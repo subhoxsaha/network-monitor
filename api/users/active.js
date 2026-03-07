@@ -1,5 +1,5 @@
-import connectDB from '../api/lib/mongodb.js';
-import Trail from '../api/lib/Trail.js';
+import connectDB from '../lib/mongodb.js';
+import Trail from '../lib/Trail.js';
 
 const headers = {
   'Access-Control-Allow-Origin': '*',

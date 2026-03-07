@@ -24,29 +24,35 @@ const DEFAULT_CENTER = { lat: 20.5937, lng: 78.9629 }; // India
 
 // Helper to center the map bounds dynamically
 const MapBoundsFitter = ({ trail, livePos, activeIdx }) => {
-  const map = useMap();
-  
-  useEffect(() => {
-    if (!map) return;
+  const map = useMapEvents({
+    zoom: () => {
+      const z = map.getZoom();
+      const scale = Math.max(0.4, Math.min(2.5, Math.pow(1.2, z - 14)));
+      map.getContainer().style.setProperty('--map-icon-scale', scale);
+    }
+  });
 
-    // 1. User clicks a specific waypoint from the log list
-    if (activeIdx !== null && trail[activeIdx]) {
+  useEffect(() => {
+    // Set initial scale
+    const z = map.getZoom();
+    const scale = Math.max(0.4, Math.min(2.5, Math.pow(1.2, z - 14)));
+    map.getContainer().style.setProperty('--map-icon-scale', scale);
+
+    if (trail.length === 0) return;
+    
+    // 1. Single active waypoint (from map click) -> Center tightly on it
+    if (activeIdx !== null && activeIdx >= 0 && activeIdx < trail.length) {
       map.flyTo([trail[activeIdx].lat, trail[activeIdx].lng], 18, { animate: true, duration: 1.5 });
       return;
     }
-
-    // 2. Initial load/empty trail: optionally center on live pos if available
-    if (trail.length === 0) {
-      if (livePos) {
-        // Only set view if map isn't already deeply zoomed somewhere
-        if (map.getZoom() < 10) {
-          map.setView([livePos.latitude, livePos.longitude], 17, { animate: true, duration: 1.5 });
-        }
-      }
+    
+    // 2. Continuous Live tracking mode (only 1 point total, and we have livePos) -> Center tightly
+    if (trail.length === 1 && livePos) {
+      map.flyTo([livePos.latitude, livePos.longitude], 18, { animate: true, duration: 1.5 });
       return;
     }
-    
-    // 3. One waypoint in trail
+
+    // 3. Single waypoint with no active live tracking
     if (trail.length === 1) {
       map.flyTo([trail[0].lat, trail[0].lng], 17, { animate: true, duration: 1.5 });
       return;
@@ -344,10 +350,12 @@ const LocationTracker = () => {
       return L.divIcon({
         className: 'custom-leaflet-marker',
         html: `
-          <div style="transform: rotate(${heading}deg); width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; position: relative;">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="#0a84ff" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="filter: drop-shadow(0px 1px 3px rgba(0,0,0,0.5)); transform: translateY(-4px);">
-              <path d="M12 2L2 22l10-4 10 4L12 2z" />
-            </svg>
+          <div style="position: relative; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; transform: scale(var(--map-icon-scale, 1)); transform-origin: center center; transition: transform 0.1s ease-out;">
+            <div style="transform: rotate(${heading}deg); position: absolute; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="#0a84ff" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="filter: drop-shadow(0px 1px 3px rgba(0,0,0,0.5)); transform: translateY(-4px);">
+                <path d="M12 2L2 22l10-4 10 4L12 2z" />
+              </svg>
+            </div>
           </div>
         `,
         iconSize: [32, 32],
@@ -358,7 +366,7 @@ const LocationTracker = () => {
     return L.divIcon({
       className: 'custom-leaflet-marker',
       html: `
-        <div style="width: 16px; height: 16px; background-color: #0a84ff; border: 2.5px solid white; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>
+        <div style="width: 16px; height: 16px; background-color: #0a84ff; border: 2.5px solid white; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.3); transform: scale(var(--map-icon-scale, 1)); transform-origin: center center; transition: transform 0.1s ease-out;"></div>
       `,
       iconSize: [16, 16],
       iconAnchor: [8, 8]
@@ -371,7 +379,7 @@ const LocationTracker = () => {
     return L.divIcon({
       className: 'custom-leaflet-waypoint-marker',
       html: `
-        <div style="width: 28px; height: 28px;">
+        <div style="width: 28px; height: 28px; transform: scale(var(--map-icon-scale, 1)); transform-origin: bottom center; transition: transform 0.1s ease-out;">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.4));">
             <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 1118 0z" fill="${color}" stroke="#fff" stroke-width="2"/>
             <circle cx="12" cy="10" r="3" fill="#fff"/>

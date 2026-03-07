@@ -19,6 +19,26 @@ html {
 }
 
 :root {
+  /* LIGHT Theme (Default) */
+  --color-canvas: #f8fafc;
+  --color-surface: #ffffff;
+  --color-surface-light: #f1f5f9;
+  --color-ink: #0f172a;
+  --color-ink-secondary: #334155;
+  --color-ink-tertiary: #64748b;
+  --color-ink-quaternary: #94a3b8;
+  --color-blue: #0ea5e9;
+  --color-green: #16a34a;
+  --color-amber: #d97706;
+  --color-red: #dc2626;
+  --card-border: rgba(0, 0, 0, 0.06);
+  --glass-bg: rgba(255, 255, 255, 0.85);
+  --glow-color: rgba(14, 165, 233, 0.15);
+  --map-icon-scale: 1; /* Default for dynamic leaflet zoom scaling */
+}
+
+.dark {
+  /* DARK Theme */
   --color-canvas: #09090b;
   --color-surface: #18181b;
   --color-surface-light: #27272a;
@@ -31,6 +51,8 @@ html {
   --color-amber: #f59e0b;
   --color-red: #ef4444;
   --card-border: rgba(255, 255, 255, 0.08);
+  --glass-bg: rgba(18, 18, 20, 0.85);
+  --glow-color: rgba(14, 165, 233, 0.4);
 }
 
 body {
@@ -111,17 +133,17 @@ body {
   width: 5px;
 }
 .premium-scrollbar::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--color-surface-light);
   border-radius: 10px;
 }
 .premium-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--color-ink-quaternary);
   border-radius: 10px;
   border: 1px solid transparent;
   background-clip: content-box;
 }
 .premium-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--color-ink-tertiary);
 }
 
 /* ─── JSON Syntax Highlighting ─── */
@@ -281,9 +303,10 @@ body {
 }
 
 .glass {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--glass-bg);
   backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--card-border);
 }
 
 /* Staggered entry transitions */
@@ -294,11 +317,11 @@ body {
 .stagger-5 { animation-delay: 0.5s; }
 /* ─── Professional Toast Customization ─── */
 .glass-toast {
-  background: rgba(18, 18, 20, 0.85) !important;
+  background: var(--glass-bg) !important;
   backdrop-filter: blur(20px) !important;
   -webkit-backdrop-filter: blur(20px) !important;
-  border: 1px solid rgba(255, 255, 255, 0.12) !important;
-  color: #fff !important;
+  border: 1px solid var(--card-border) !important;
+  color: var(--color-ink) !important;
   border-radius: 16px !important;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4) !important;
   padding: 12px 20px !important;

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { MapPin, Wifi, Crosshair, Globe, Navigation, Locate, Copy, Map as MapIcon, Mountain, Layers, ChevronDown } from 'lucide-react';
-import { MapContainer, TileLayer, Marker, Popup, Circle as LeafletCircle, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Circle as LeafletCircle, useMapEvents, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useSharedPublicIP } from '../context/NetworkContext';
@@ -21,14 +21,27 @@ const MAP_TYPES = [
   { id: 'dark', label: 'Dark Mode', icon: Layers, url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', maxZoom: 19, attribution: '© CARTO' }
 ];
 
-// Helper to center the map on GPS/IP location dynamically
-const MapCenterer = ({ lat, lng, zoom }) => {
-  const map = useMap();
+// Helper to control map behavior dynamically
+const MapController = ({ lat, lng, zoom }) => {
+  const map = useMapEvents({
+    zoom: () => {
+      const z = map.getZoom();
+      // Calculate dynamic scale. Base zoom is 14.
+      const scale = Math.max(0.4, Math.min(2.5, Math.pow(1.2, z - 14)));
+      map.getContainer().style.setProperty('--map-icon-scale', scale);
+    }
+  });
+
   useEffect(() => {
     if (lat != null && lng != null) {
       map.flyTo([lat, lng], zoom, { duration: 1.5 });
     }
+    // Set initial scale
+    const z = map.getZoom();
+    const scale = Math.max(0.4, Math.min(2.5, Math.pow(1.2, z - 14)));
+    map.getContainer().style.setProperty('--map-icon-scale', scale);
   }, [lat, lng, zoom, map]);
+
   return null;
 };
 
@@ -46,6 +59,53 @@ const GeoAndConnection = () => {
   const { user } = useAuth();
   const [activeUsers, setActiveUsers] = useState([]);
 
+  // Spatial Jitter (Spiderfy) to prevent identical coordinates from perfectly overlapping
+  const applySpatialSpiderfy = useCallback((users) => {
+    if (!users || users.length <= 1) return users;
+
+    const grouped = {};
+    const processed = [];
+
+    // Group users by roughly 11 meter precision (4 decimal places)
+    users.forEach(user => {
+      const latKey = user.lastLocation?.lat.toFixed(4);
+      const lngKey = user.lastLocation?.lng.toFixed(4);
+      const key = `${latKey},${lngKey}`;
+      
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(user);
+    });
+
+    // Apply radial spread for crowded locations
+    Object.values(grouped).forEach(group => {
+      if (group.length === 1) {
+        processed.push(group[0]);
+      } else {
+        // Leave the first user at the exact center, orbit the rest
+        processed.push(group[0]);
+        
+        const count = group.length - 1;
+        // Radius rough estimation: 0.0001 lat/lng is ~11 meters. 
+        // We'll spread them about ~15 meters out.
+        const radius = 0.00015; 
+        const angleStep = (Math.PI * 2) / count;
+
+        for (let i = 1; i <= count; i++) {
+          const user = { ...group[i] };
+          const angle = i * angleStep;
+          user.lastLocation = {
+            ...user.lastLocation,
+            lat: user.lastLocation.lat + Math.cos(angle) * radius,
+            lng: user.lastLocation.lng + Math.sin(angle) * radius * 1.5 // Multiplier for visual aspect ratio
+          };
+          processed.push(user);
+        }
+      }
+    });
+
+    return processed;
+  }, []);
+
   // Fetch active users on interval
   useEffect(() => {
     if (!user?.sub) return;
@@ -53,7 +113,10 @@ const GeoAndConnection = () => {
     const fetchActiveUsers = async () => {
       try {
         const res = await apiCall('GET', user.sub, '/api/users/active');
-        if (res?.activeUsers) setActiveUsers(res.activeUsers);
+        if (res?.activeUsers) {
+          const processedUsers = applySpatialSpiderfy(res.activeUsers);
+          setActiveUsers(processedUsers);
+        }
       } catch (err) {
         console.error('Failed to fetch active users:', err);
       }
@@ -70,25 +133,34 @@ const GeoAndConnection = () => {
       return L.divIcon({
         className: 'custom-leaflet-marker',
         html: `
-          <div style="width: 28px; height: 28px; border-radius: 50%; padding: 2px; background: linear-gradient(135deg, #0a84ff, #8a2be2); box-shadow: 0 4px 12px rgba(0,0,0,0.5); transform: translateY(-4px); display: flex; align-items: center; justify-content: center;">
-            <img src="${u.picture}" style="width: 100%; height: 100%; border-radius: 50%; border: 2px solid white; object-fit: cover;" />
+          <div style="position: relative; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; transform: translateY(-4px) scale(var(--map-icon-scale, 1)); transform-origin: bottom center; transition: transform 0.1s ease-out;">
+            <div style="position: absolute; width: 100%; height: 100%; background: #0a84ff; border-radius: 50%; opacity: 0.4; animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
+            <div style="position: relative; width: 28px; height: 28px; border-radius: 50%; padding: 2px; background: linear-gradient(135deg, #0a84ff, #8a2be2); box-shadow: 0 4px 12px rgba(0,0,0,0.5); z-index: 10; display: flex; align-items: center; justify-content: center;">
+              <img src="${u.picture}" style="width: 100%; height: 100%; border-radius: 50%; border: 2px solid white; object-fit: cover;" />
+            </div>
           </div>
         `,
-        iconSize: [28, 28],
-        iconAnchor: [14, 14],
-        popupAnchor: [0, -14],
+        iconSize: [32, 32],
+        iconAnchor: [16, 16],
+        popupAnchor: [0, -16],
       });
     }
+    
+    // Dynamic Fallback Avatar (Initials) using ui-avatars
+    const fallbackUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(u.name || 'User')}&background=random&color=fff&size=128&bold=true`;
     return L.divIcon({
       className: 'custom-leaflet-marker',
       html: `
-        <div style="width: 24px; height: 24px; background-color: #8a2be2; border: 2.5px solid white; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 12px; transform: translateY(-4px);">
-          ${u.name.charAt(0).toUpperCase()}
+        <div style="position: relative; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; transform: translateY(-4px) scale(var(--map-icon-scale, 1)); transform-origin: bottom center; transition: transform 0.1s ease-out;">
+          <div style="position: absolute; width: 100%; height: 100%; background: #8a2be2; border-radius: 50%; opacity: 0.4; animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
+          <div style="position: relative; width: 28px; height: 28px; border-radius: 50%; padding: 2px; background: linear-gradient(135deg, #8a2be2, #0a84ff); box-shadow: 0 4px 12px rgba(0,0,0,0.5); z-index: 10; display: flex; align-items: center; justify-content: center;">
+            <img src="${fallbackUrl}" style="width: 100%; height: 100%; border-radius: 50%; border: 2px solid white; object-fit: cover;" />
+          </div>
         </div>
       `,
-      iconSize: [24, 24],
-      iconAnchor: [12, 12],
-      popupAnchor: [0, -12],
+      iconSize: [28, 28],
+      iconAnchor: [14, 14],
+      popupAnchor: [0, -14],
     });
   }, []);
 
@@ -136,39 +208,38 @@ const GeoAndConnection = () => {
 
   // Create custom Blue Dot Icon with HTML
   const customDotMarker = useMemo(() => {
-    const geoStatus = geo.permissionStatus; // Use actual permission status
-    const isGPSActive = showingGPS && geoStatus === 'granted';
-    const heading = geo.heading || 0;
-
-    // Animate compass arrow for active GPS
-    if (isGPSActive && heading != null) {
+    // If the authenticated user has a profile picture, show their avatar pin
+    if (user?.picture) {
       return L.divIcon({
         className: 'custom-leaflet-marker',
         html: `
-          <div style="transform: rotate(${heading}deg); width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; position: relative;">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="#30d158" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="filter: drop-shadow(0px 1px 3px rgba(0,0,0,0.5)); transform: translateY(-4px);">
-              <path d="M12 2L2 22l10-4 10 4L12 2z" />
-            </svg>
+          <div style="position: relative; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; transform: translateY(-4px) scale(var(--map-icon-scale, 1)); transform-origin: bottom center; transition: transform 0.1s ease-out;">
+            <div style="position: absolute; width: 100%; height: 100%; background: #30d158; border-radius: 50%; opacity: 0.3; animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
+            <div style="position: relative; width: 32px; height: 32px; border-radius: 50%; padding: 2px; background: linear-gradient(135deg, #30d158, #0a84ff); box-shadow: 0 4px 16px rgba(0,0,0,0.4); z-index: 10; display: flex; align-items: center; justify-content: center;">
+              <img src="${user.picture}" style="width: 100%; height: 100%; border-radius: 50%; border: 2.5px solid white; object-fit: cover;" />
+            </div>
           </div>
         `,
-        iconSize: [32, 32],
-        iconAnchor: [16, 16], // Center of SVG
-        popupAnchor: [0, -12],
+        iconSize: [36, 36],
+        iconAnchor: [18, 18],
+        popupAnchor: [0, -18],
       });
     }
 
-    // Default Circle for non-GPS or denied GPS
+    // Fallback Circle
+    const geoStatus = geo.permissionStatus; 
+    const isGPSActive = showingGPS && geoStatus === 'granted';
     return L.divIcon({
       className: 'custom-leaflet-marker',
       html: `
-        <div style="width: 16px; height: 16px; background-color: ${isGPSActive ? '#30d158' : '#0a84ff'}; border: 2.5px solid white; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">
+        <div style="width: 16px; height: 16px; background-color: ${isGPSActive ? '#30d158' : '#0a84ff'}; border: 2.5px solid white; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.3); transform: scale(var(--map-icon-scale, 1)); transform-origin: center center; transition: transform 0.1s ease-out;">
         </div>
       `,
       iconSize: [16, 16],
       iconAnchor: [8, 8],
       popupAnchor: [0, -8],
     });
-  }, [showingGPS, geo.permissionStatus, geo.position?.heading]);
+  }, [showingGPS, geo.permissionStatus, user?.picture]);
 
 
   const TableRow = ({ label, value }) => (
@@ -263,7 +334,7 @@ const GeoAndConnection = () => {
                   maxZoom={selectedTheme.maxZoom}
                 />
 
-                <MapCenterer lat={lat} lng={lng} zoom={mapZoom} />
+                <MapController lat={lat} lng={lng} zoom={mapZoom} />
 
                 <LeafletCircle
                   center={mapCenter}
@@ -313,13 +384,25 @@ const GeoAndConnection = () => {
                     key={u.userId}
                     position={[u.lastLocation.lat, u.lastLocation.lng]}
                     icon={getActiveUserIcon(u)}
+                    zIndexOffset={100}
                   >
-                    <Popup className="custom-popup" closeButton={false}>
-                      <div style={{ fontFamily: 'Inter, sans-serif', padding: '2px', minWidth: '130px' }}>
-                        <div style={{ fontWeight: 700, fontSize: '13px', color: '#1c1c1e', marginBottom: '2px' }}>{u.name}</div>
-                        <div style={{ fontSize: '11px', color: '#636366' }}>Active {new Date(u.lastActive).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                    <Tooltip 
+                      direction="top"
+                      offset={[0, -20]}
+                      opacity={1}
+                      className="!bg-transparent !border-none !shadow-none !p-0 popup-override"
+                    >
+                      <div className="flex flex-col gap-0.5 px-3 py-2 min-w-[140px] rounded-xl shadow-2xl" style={{ background: 'var(--color-surface)', border: '1px solid rgba(255,255,255,0.1)', backdropFilter: 'blur(10px)' }}>
+                        <div className="font-bold text-sm tracking-tight text-ink">{u.name}</div>
+                        <div className="text-[11px] font-medium text-ink-tertiary flex items-center gap-1.5">
+                          <span className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                          </span>
+                          Active {new Date(u.lastActive).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </div>
                       </div>
-                    </Popup>
+                    </Tooltip>
                   </Marker>
                 ))}
               </MapContainer>

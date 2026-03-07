@@ -5,10 +5,13 @@ import { Activity, Globe, Wrench, BookOpen, MapPinPlus, LogOut } from 'lucide-re
 import { GoogleOAuthProvider } from '@react-oauth/google';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { NetworkProvider } from './context/NetworkContext';
+import { ThemeProvider } from './context/ThemeContext';
+import TailwindNavbar from './components/TailwindNavbar';
 import TailwindNavbar from './components/TailwindNavbar';
 import PageTitle from './components/PageTitle';
 import ParticlesBackground from './components/ParticlesBackground';
 import ProtectedRoute from './components/ProtectedRoute';
+import LivePresence from './components/LivePresence';
 
 import OverviewPage from './pages/OverviewPage';
 import PerformancePage from './pages/PerformancePage';
@@ -91,6 +94,7 @@ const Layout = ({ children }) => {
           duration: 4000
         }}
       />
+      <LivePresence />
     </div>
   );
 };
@@ -130,13 +134,15 @@ const App = () => {
 
   return (
     <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
-      <AuthProvider>
-        <NetworkProvider>
-          <BrowserRouter>
-            <AppRoutes />
-          </BrowserRouter>
-        </NetworkProvider>
-      </AuthProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <NetworkProvider>
+            <BrowserRouter>
+              <AppRoutes />
+            </BrowserRouter>
+          </NetworkProvider>
+        </AuthProvider>
+      </ThemeProvider>
     </GoogleOAuthProvider>
   );
 };

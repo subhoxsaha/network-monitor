@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Wifi, RefreshCw, Clock, Sun, Moon, LogOut, User as UserIcon, ChevronDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useTheme } from '../context/ThemeContext';
 import { cn } from '../lib/classnames';
 import { useCopy } from '../hooks/useCustom';
 
@@ -14,14 +15,8 @@ const TailwindNavbar = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef(null);
   
-  const [isDark, setIsDark] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('theme');
-      if (saved) return saved === 'dark';
-      return window.matchMedia('(prefers-color-scheme: dark)').matches;
-    }
-    return true;
-  });
+  const { theme, toggleTheme } = useTheme();
+  const isDark = theme === 'dark';
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -42,7 +37,6 @@ const TailwindNavbar = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Get short timezone code (e.g. IST, PST)
   const shortTz = useMemo(() => {
     try {
       return new Intl.DateTimeFormat('en-US', { timeZoneName: 'short' })
@@ -50,18 +44,6 @@ const TailwindNavbar = () => {
         .find(part => part.type === 'timeZoneName')?.value || '';
     } catch { return ''; }
   }, []);
-
-  useEffect(() => {
-    const root = document.documentElement;
-    if (isDark) {
-      root.classList.add('dark');
-    } else {
-      root.classList.remove('dark');
-    }
-    localStorage.setItem('theme', isDark ? 'dark' : 'light');
-  }, [isDark]);
-
-  const toggleTheme = () => setIsDark(!isDark);
 
   const handleRefresh = () => {
     window.location.reload();
