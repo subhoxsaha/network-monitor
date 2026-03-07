@@ -485,7 +485,11 @@ export const useDeviceInfo = () => {
     else if (/Mac OS X/.test(ua)) os = 'macOS';
     else if (/Android/.test(ua)) os = 'Android';
     else if (/iPhone|iPad/.test(ua)) os = 'iOS / iPadOS';
-    else if (/Linux/.test(ua)) os = 'Linux';
+    else if (/Linux/.test(ua)) {
+      // Many mobile browsers mask as Linux. Check touch points as a hint.
+      if (navigator.maxTouchPoints > 0) os = 'Android / Mobile';
+      else os = 'Linux';
+    }
 
     let browser = 'Unknown';
     if (/Edg\//.test(ua)) browser = 'Microsoft Edge';
@@ -550,9 +554,32 @@ export const useDeviceTelemetry = () => {
     battery: null,
     orientation: { alpha: 0, beta: 0, gamma: 0 },
     memory: null,
+    permissionStatus: 'unknown'
   });
 
+  const requestPermissions = async () => {
+    // iOS 13+ requires explicit permission for DeviceOrientation
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      try {
+        const response = await DeviceOrientationEvent.requestPermission();
+        setTelemetry(prev => ({ ...prev, permissionStatus: response }));
+        return response === 'granted';
+      } catch (err) {
+        console.error('DeviceOrientation permission error:', err);
+        setTelemetry(prev => ({ ...prev, permissionStatus: 'denied' }));
+        return false;
+      }
+    }
+    // Android/Desktop generally don't require the requestPermission() call but might still need user interaction
+    setTelemetry(prev => ({ ...prev, permissionStatus: 'granted' }));
+    return true;
+  };
+
   useEffect(() => {
+    // Check if permission already exists or if it's not required
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission !== 'function') {
+       setTelemetry(prev => ({ ...prev, permissionStatus: 'granted' }));
+    }
     // 1. Battery API
     let batteryHandler = null;
     if ('getBattery' in navigator) {
@@ -614,5 +641,5 @@ export const useDeviceTelemetry = () => {
     };
   }, []);
 
-  return telemetry;
+  return { ...telemetry, requestPermissions };
 };
