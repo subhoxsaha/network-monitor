@@ -2,6 +2,9 @@
   "name": "network-monitor-react",
   "version": "1.0.0",
   "type": "module",
+  "engines": {
+    "node": "20.x"
+  },
   "scripts": {
     "dev": "vite --host",
     "start": "node server.js",
@@ -38,6 +41,7 @@
     "@vitejs/plugin-basic-ssl": "^1.0.1",
     "@vitejs/plugin-react": "^4.0.0",
     "autoprefixer": "^10.4.17",
+    "esbuild": "^0.27.3",
     "eslint": "^8.56.0",
     "eslint-config-react-app": "^7.0.1",
     "postcss": "^8.4.32",
