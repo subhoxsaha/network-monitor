@@ -51,6 +51,7 @@ export default async function handler(req, res) {
             lng: lastLocation.lng,
             timestamp: lastLocation.timestamp
           },
+          points: points.map(p => ({ lat: p.lat, lng: p.lng, timestamp: p.timestamp })),
           lastActive: trail.updatedAt
         };
       });

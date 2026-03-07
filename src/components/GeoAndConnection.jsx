@@ -457,12 +457,26 @@ const GeoAndConnection = () => {
 
               <div className="absolute inset-0 z-0 transition-all duration-1000 ease-out"
                    style={{ opacity: isMapReady ? 1 : 0, filter: isMapReady ? 'blur(0px)' : 'blur(8px)', transform: isMapReady ? 'scale(1)' : 'scale(1.02)' }}>
+                <style>{`
+                  .leaflet-container .map-line-deep { stroke-width: calc(var(--map-line-scale, 1) * 8px) !important; transition: stroke-width 0.1s; }
+                  .leaflet-container .map-line-mid { stroke-width: calc(var(--map-line-scale, 1) * 4px) !important; transition: stroke-width 0.1s; }
+                  .leaflet-container .map-line-core { stroke-width: calc(var(--map-line-scale, 1) * 1.2px) !important; transition: stroke-width 0.1s; }
+                  .leaflet-container .map-local-deep { stroke-width: calc(var(--map-line-scale, 1) * var(--local-deep, 10px)) !important; transition: stroke-width 0.1s; }
+                  .leaflet-container .map-local-mid { stroke-width: calc(var(--map-line-scale, 1) * var(--local-mid, 5px)) !important; transition: stroke-width 0.1s; }
+                  .leaflet-container .map-local-core { stroke-width: calc(var(--map-line-scale, 1) * var(--local-core, 1.5px)) !important; transition: stroke-width 0.1s; }
+                `}</style>
                 <MapContainer
                   ref={mapRef}
                   center={mapCenter}
                   zoom={mapZoom}
                   zoomControl={false}
-                  style={{ width: '100%', height: '100%' }}
+                  style={{ 
+                    width: '100%', 
+                    height: '100%',
+                    '--local-deep': `${trailThickness * 2.5}px`,
+                    '--local-mid': `${trailThickness * 1.2}px`,
+                    '--local-core': `${Math.max(0.8, trailThickness * 0.3)}px`
+                  }}
                   whenReady={() => setTimeout(() => setIsMapReady(true), 400)}
                 >
                   <TileLayer attribution={selectedTheme.attribution} url={selectedTheme.url} maxZoom={selectedTheme.maxZoom} />
@@ -471,9 +485,9 @@ const GeoAndConnection = () => {
 
                   {polylinePath.length >= 2 && (
                     <>
-                      <Polyline positions={polylinePath} pathOptions={{ color: activeColor.value, opacity: 0.1, weight: trailThickness * 2.5, lineJoin: 'round', lineCap: 'round', className: 'map-glow-trail-deep' }} />
-                      <Polyline positions={polylinePath} pathOptions={{ color: activeColor.value, opacity: 0.22, weight: trailThickness * 1.2, lineJoin: 'round', lineCap: 'round', className: 'map-glow-trail' }} />
-                      <Polyline positions={polylinePath} pathOptions={{ color: activeColor.value, opacity: 0.9, weight: Math.max(0.8, trailThickness * 0.3), lineJoin: 'round', lineCap: 'round' }} />
+                      <Polyline positions={polylinePath} pathOptions={{ color: activeColor.value, opacity: 0.1, lineJoin: 'round', lineCap: 'round', className: 'map-local-deep map-glow-trail-deep' }} />
+                      <Polyline positions={polylinePath} pathOptions={{ color: activeColor.value, opacity: 0.22, lineJoin: 'round', lineCap: 'round', className: 'map-local-mid map-glow-trail' }} />
+                      <Polyline positions={polylinePath} pathOptions={{ color: activeColor.value, opacity: 0.9, lineJoin: 'round', lineCap: 'round', className: 'map-local-core' }} />
                     </>
                   )}
 
@@ -538,22 +552,35 @@ const GeoAndConnection = () => {
                     </Marker>
                   )}
 
-                  {activeUsers.map(u => (
-                    <Marker key={u.userId} position={[u.lastLocation.lat, u.lastLocation.lng]} icon={getActiveUserIcon(u)} zIndexOffset={100}>
-                      <Tooltip direction="top" offset={[0, -20]} opacity={1} className="!bg-transparent !border-none !shadow-none !p-0 popup-override">
-                        <div className="flex flex-col gap-0.5 px-3 py-2 min-w-[140px] rounded-xl shadow-2xl" style={{ background: 'var(--color-surface)', border: '1px solid rgba(255,255,255,0.1)', backdropFilter: 'blur(10px)' }}>
-                          <div className="font-bold text-sm tracking-tight text-ink">{u.name}</div>
-                          <div className="text-[11px] font-medium text-ink-tertiary flex items-center gap-1.5">
-                            <span className="relative flex h-2 w-2">
-                              <span className="animate-stable-pulse absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                              <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                            </span>
-                            Active {new Date(u.lastActive).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </div>
-                        </div>
-                      </Tooltip>
-                    </Marker>
-                  ))}
+                  {activeUsers.map(u => {
+                    const uColor = u.pulseColor || pinColor(u.userId?.charCodeAt(0) || 0); // fallback hue
+                    const uPath = u.points ? generateWavyPath(u.points.map(p => [p.lat, p.lng]), 'cyber-wave') : [];
+                    return (
+                      <React.Fragment key={u.userId}>
+                        {uPath.length >= 2 && (
+                          <>
+                            <Polyline positions={uPath} pathOptions={{ color: uColor, opacity: 0.1, lineJoin: 'round', lineCap: 'round', className: 'map-line-deep map-glow-trail-deep' }} />
+                            <Polyline positions={uPath} pathOptions={{ color: uColor, opacity: 0.22, lineJoin: 'round', lineCap: 'round', className: 'map-line-mid map-glow-trail' }} />
+                            <Polyline positions={uPath} pathOptions={{ color: uColor, opacity: 0.9, lineJoin: 'round', lineCap: 'round', className: 'map-line-core' }} />
+                          </>
+                        )}
+                        <Marker position={[u.lastLocation.lat, u.lastLocation.lng]} icon={getActiveUserIcon(u)} zIndexOffset={100}>
+                          <Tooltip direction="top" offset={[0, -20]} opacity={1} className="!bg-transparent !border-none !shadow-none !p-0 popup-override">
+                            <div className="flex flex-col gap-0.5 px-3 py-2 min-w-[140px] rounded-xl shadow-2xl" style={{ background: 'var(--color-surface)', border: '1px solid rgba(255,255,255,0.1)', backdropFilter: 'blur(10px)' }}>
+                              <div className="font-bold text-sm tracking-tight text-ink">{u.name}</div>
+                              <div className="text-[11px] font-medium text-ink-tertiary flex items-center gap-1.5">
+                                <span className="relative flex h-2 w-2">
+                                  <span className="animate-stable-pulse absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                                </span>
+                                Active {new Date(u.lastActive).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </div>
+                            </div>
+                          </Tooltip>
+                        </Marker>
+                      </React.Fragment>
+                    );
+                  })}
                 </MapContainer>
               </div>
 
@@ -580,11 +607,12 @@ const GeoAndConnection = () => {
                           ].filter(Boolean).join(', ') : [geo.address.road || geo.address.pedestrian, geo.address.city || geo.address.town || geo.address.village].filter(Boolean).join(', ')
                         ) : 'Official Address'}
                       </span>
-                      {isAddressExpanded && (
+                      {isAddressExpanded && geo.address && showingGPS && (
                         <div className="flex items-center gap-2 mt-1">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
+                              if (!geo.address) return;
                               const addr = geo.address;
                               const full = [
                                 addr.road || addr.pedestrian,
@@ -606,10 +634,11 @@ const GeoAndConnection = () => {
                         </div>
                       )}
                     </div>
-                    {!isAddressExpanded && <Copy className="w-3 h-3 mt-0.5 opacity-40 group-hover:opacity-100 transition-opacity" 
+                    {!isAddressExpanded && geo.address && showingGPS && <Copy className="w-3 h-3 mt-0.5 opacity-40 group-hover:opacity-100 transition-opacity" 
                       onClick={(e) => {
                         e.stopPropagation();
                         // Copy short address if clicked directly on icon
+                        if (!geo.address) return;
                         const addr = geo.address;
                         const short = [addr.road || addr.pedestrian, addr.city || addr.town || addr.village].filter(Boolean).join(', ');
                         copy(short);
