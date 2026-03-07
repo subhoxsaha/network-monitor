@@ -230,11 +230,11 @@ const HTTPTester = () => {
   const renderKeyValueRows = (rows, setRows, keyPlaceholder, valuePlaceholder) => (
     <div className="space-y-2">
       {rows.map((row, idx) => (
-        <div key={idx} className="flex items-center gap-2">
-          <input type="text" value={row[0]} onChange={(e) => updateRow(setRows, rows, idx, 'key', e.target.value)} placeholder={keyPlaceholder} className="input flex-1 min-w-0 w-1/2 text-xs sm:text-sm font-mono" />
-          <input type="text" value={row[1]} onChange={(e) => updateRow(setRows, rows, idx, 'value', e.target.value)} placeholder={valuePlaceholder} className="input flex-1 min-w-0 w-1/2 text-xs sm:text-sm font-mono" />
-          <button onClick={() => removeRow(setRows, rows, idx)} className="p-2 text-ink-quaternary hover:text-ink transition-colors rounded-lg hover:bg-surface-light shrink-0">
-            <Trash2 className="w-4 h-4" />
+        <div key={idx} className="flex items-center gap-1.5 sm:gap-2">
+          <input type="text" value={row[0]} onChange={(e) => updateRow(setRows, rows, idx, 'key', e.target.value)} placeholder={keyPlaceholder} className="input flex-1 min-w-0 w-1/2 text-[10px] sm:text-sm font-mono px-2 py-1.5 sm:px-3 sm:py-2" />
+          <input type="text" value={row[1]} onChange={(e) => updateRow(setRows, rows, idx, 'value', e.target.value)} placeholder={valuePlaceholder} className="input flex-1 min-w-0 w-1/2 text-[10px] sm:text-sm font-mono px-2 py-1.5 sm:px-3 sm:py-2" />
+          <button onClick={() => removeRow(setRows, rows, idx)} className="p-1.5 sm:p-2 text-ink-quaternary hover:text-ink transition-colors rounded-lg hover:bg-surface-light shrink-0">
+            <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </button>
         </div>
       ))}
@@ -280,8 +280,8 @@ const HTTPTester = () => {
         </div>
 
         {/* Tabs */}
-        <div className="px-4 sm:px-6 border-b" style={{ borderColor: 'var(--card-border)' }}>
-          <div className="flex gap-0 -mb-px">
+        <div className="px-2 sm:px-6 border-b" style={{ borderColor: 'var(--card-border)' }}>
+          <div className="flex gap-1 sm:gap-3 overflow-x-auto scrollbar-hide -mb-px">
             {REQUEST_TABS.map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -289,10 +289,10 @@ const HTTPTester = () => {
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-2 px-3 sm:px-4 py-3 text-xs sm:text-sm font-medium border-b-2 transition-colors
+                  className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-3 text-[11px] sm:text-sm font-medium border-b-2 transition-colors whitespace-nowrap
                     ${isActive ? 'border-ink text-ink' : 'border-transparent text-ink-tertiary hover:text-ink-secondary'}`}
                 >
-                  <Icon className="w-4 h-4" />
+                  <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                   {tab.label}
                   {tab.count > 0 && (
                     <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ backgroundColor: isActive ? 'var(--badge-bg)' : 'var(--color-surface-light)' }}>
@@ -311,9 +311,9 @@ const HTTPTester = () => {
           {activeTab === 'params' && renderKeyValueRows(params, setParams, 'param key', 'param value')}
           {activeTab === 'body' && (
             <div className="space-y-3">
-              <div className="flex items-center gap-3">
-                <label className="text-sm font-medium text-ink-secondary">Content Type</label>
-                <select value={bodyType} onChange={(e) => setBodyType(e.target.value)} className="select w-40 text-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+                <label className="text-xs sm:text-sm font-medium text-ink-secondary">Content Type</label>
+                <select value={bodyType} onChange={(e) => setBodyType(e.target.value)} className="select w-full sm:w-40 text-xs sm:text-sm">
                   <option value="none">None</option>
                   <option value="json">JSON</option>
                   <option value="text">Plain Text</option>
@@ -326,24 +326,26 @@ const HTTPTester = () => {
           )}
           {activeTab === 'auth' && (
             <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                <Key className="w-4 h-4 text-ink-tertiary" />
-                <label className="text-sm font-medium text-ink-secondary">Auth Type</label>
-                <select value={authType} onChange={(e) => setAuthType(e.target.value)} className="select w-44 text-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+                <div className="flex items-center gap-2">
+                  <Key className="w-4 h-4 text-ink-tertiary" />
+                  <label className="text-xs sm:text-sm font-medium text-ink-secondary">Auth Type</label>
+                </div>
+                <select value={authType} onChange={(e) => setAuthType(e.target.value)} className="select w-full sm:w-44 text-xs sm:text-sm">
                   <option value="none">No Auth</option>
                   <option value="bearer">Bearer Token</option>
                   <option value="basic">Basic Auth</option>
                   <option value="apikey">API Key</option>
                 </select>
               </div>
-              {authType === 'bearer' && <input type="password" value={authToken} onChange={(e) => setAuthToken(e.target.value)} placeholder="Enter bearer token…" className="input text-sm font-mono" />}
+              {authType === 'bearer' && <input type="password" value={authToken} onChange={(e) => setAuthToken(e.target.value)} placeholder="Enter bearer token…" className="input text-xs sm:text-sm font-mono w-full" />}
               {authType === 'basic' && (
-                <div className="grid grid-cols-2 gap-3">
-                  <input type="text" value={authUsername} onChange={(e) => setAuthUsername(e.target.value)} placeholder="Username" className="input text-sm" />
-                  <input type="password" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} placeholder="Password" className="input text-sm" />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <input type="text" value={authUsername} onChange={(e) => setAuthUsername(e.target.value)} placeholder="Username" className="input text-xs sm:text-sm w-full" />
+                  <input type="password" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} placeholder="Password" className="input text-xs sm:text-sm w-full" />
                 </div>
               )}
-              {authType === 'apikey' && <input type="password" value={authApiKey} onChange={(e) => setAuthApiKey(e.target.value)} placeholder="Enter API key…" className="input text-sm font-mono" />}
+              {authType === 'apikey' && <input type="password" value={authApiKey} onChange={(e) => setAuthApiKey(e.target.value)} placeholder="Enter API key…" className="input text-xs sm:text-sm font-mono w-full" />}
             </div>
           )}
         </div>
@@ -351,8 +353,8 @@ const HTTPTester = () => {
         {/* Response */}
         {responseStatus !== null && (
           <div style={{ borderTop: '1px solid var(--card-border)' }}>
-            <div className="px-4 sm:px-6 py-3 flex items-center gap-4" style={{ borderBottom: '1px solid var(--card-border)', backgroundColor: 'var(--color-surface-light)' }}>
-              <span className="text-xs font-bold px-3 py-1 rounded-full text-white" style={{ 
+            <div className="px-4 sm:px-6 py-3 flex flex-wrap items-center gap-x-4 gap-y-2" style={{ borderBottom: '1px solid var(--card-border)', backgroundColor: 'var(--color-surface-light)' }}>
+              <span className="text-[10px] sm:text-xs font-bold px-2.5 sm:px-3 py-1 rounded-full text-white shrink-0" style={{ 
                 backgroundColor: responseStatus >= 200 && responseStatus < 300 ? '#30d158' : 
                                  responseStatus >= 400 ? '#ff453a' : 
                                  responseStatus >= 300 ? '#ffd60a' : 'var(--color-ink-tertiary)' 
@@ -360,22 +362,22 @@ const HTTPTester = () => {
                 {responseStatus}
               </span>
               {responseTime && (
-                <span className="flex items-center gap-1.5 text-xs text-ink-tertiary">
+                <span className="flex items-center gap-1 sm:gap-1.5 text-[10px] sm:text-xs text-ink-tertiary shrink-0">
                   <Clock className="w-3.5 h-3.5" />{responseTime}ms
                 </span>
               )}
               {responseSize !== null && (
-                <span className="flex items-center gap-1.5 text-xs text-ink-tertiary">
+                <span className="flex items-center gap-1 sm:gap-1.5 text-[10px] sm:text-xs text-ink-tertiary shrink-0">
                   <HardDrive className="w-3.5 h-3.5" />{formatBytes(responseSize)}
                 </span>
               )}
-              <div className="ml-auto flex items-center gap-3">
-                <button onClick={() => copy(responseBody)} className="flex items-center gap-1.5 text-xs text-ink-quaternary hover:text-ink transition-colors">
+              <div className="w-full sm:w-auto mt-1 sm:mt-0 sm:ml-auto flex items-center justify-between sm:justify-end gap-3 shrink-0 border-t sm:border-t-0 pt-2 sm:pt-0" style={{ borderColor: 'var(--card-border)' }}>
+                <button onClick={() => copy(responseBody)} className="flex items-center gap-1.5 text-xs text-ink-quaternary hover:text-ink transition-colors px-2 py-1 -ml-2 sm:ml-0 rounded-md hover:bg-surface active:bg-surface-light">
                   <Copy className="w-3.5 h-3.5" />Copy
                 </button>
-                <div className="w-px h-3 bg-white/[0.06]"></div>
-                <button onClick={() => setResponseStatus(null)} className="flex items-center text-ink-quaternary hover:text-red-500 transition-colors" title="Clear Response">
-                  <X className="w-4 h-4" />
+                <div className="w-px h-3 bg-white/[0.06] hidden sm:block"></div>
+                <button onClick={() => setResponseStatus(null)} className="flex items-center text-ink-quaternary hover:text-red-500 transition-colors px-2 py-1 -mr-2 sm:mr-0 rounded-md hover:bg-surface active:bg-surface-light" title="Clear Response">
+                  <X className="w-4 h-4" /> Clear
                 </button>
               </div>
             </div>
@@ -411,9 +413,9 @@ const HTTPTester = () => {
               <div className="px-4 sm:px-6 py-4">
                 <div className="space-y-0 rounded-lg p-4 max-h-[400px] overflow-auto" style={{ backgroundColor: 'var(--color-surface-light)' }}>
                   {Object.entries(responseHeaders).map(([key, value]) => (
-                    <div key={key} className="flex py-2" style={{ borderBottom: '1px solid var(--row-border)' }}>
-                      <span className="text-xs font-mono font-semibold text-ink w-48 shrink-0">{key}</span>
-                      <span className="text-xs font-mono text-ink-tertiary break-all">{value}</span>
+                    <div key={key} className="flex flex-col sm:flex-row py-2.5 sm:py-2" style={{ borderBottom: '1px solid var(--row-border)' }}>
+                      <span className="text-[10px] sm:text-xs font-mono font-semibold text-ink w-full sm:w-48 shrink-0 mb-1 sm:mb-0 opacity-80">{key}</span>
+                      <span className="text-[10px] sm:text-xs font-mono text-ink-tertiary break-all flex-1">{value}</span>
                     </div>
                   ))}
                 </div>

@@ -162,34 +162,6 @@ const LatencyAndPing = () => {
           </div>
         </div>
 
-        {/* Ping controls */}
-        <div className="px-4 sm:px-6 py-3 sm:py-4" style={{ borderBottom: '1px solid var(--card-border)', backgroundColor: 'var(--color-surface-light)' }}>
-          <div className="flex gap-2 sm:gap-3 items-stretch sm:items-center flex-col sm:flex-row">
-            <input
-              type="text"
-              placeholder="https://www.google.com"
-              className="input w-full sm:flex-1 min-w-0 sm:max-w-xs text-sm font-mono"
-              value={pingHost}
-              onChange={(e) => setPingHost(e.target.value)}
-              disabled={pinging}
-              onKeyDown={(e) => e.key === 'Enter' && startPing()}
-            />
-            <input
-              type="number"
-              min="1"
-              max="20"
-              value={pingCount}
-              onChange={(e) => setPingCount(parseInt(e.target.value))}
-              disabled={pinging}
-              className="input w-20 text-sm text-center"
-            />
-            <Button variant="primary" onClick={startPing} disabled={pinging} loading={pinging} className="flex items-center gap-2">
-              {!pinging && <Send className="w-4 h-4" />}
-              {pinging ? 'Pinging…' : 'Ping'}
-            </Button>
-            <span className="font-mono text-ink-tertiary text-xs ml-2">{pingStats}</span>
-          </div>
-        </div>
 
         {/* Latency results */}
         <div className="px-4 sm:px-6 py-4 sm:py-5">
@@ -244,22 +216,66 @@ const LatencyAndPing = () => {
           )}
         </div>
 
-        {/* Ping results */}
-        {pingResults.length > 0 && (
-          <div className="mx-6 mb-4 rounded-lg p-4" style={{ backgroundColor: 'var(--color-surface-light)' }}>
-            <p className="text-sm font-medium text-ink mb-2">Ping Results</p>
-            <div className="font-mono text-xs text-ink-tertiary space-y-1">
-              {pingResults.map((t, i) => (
-                <div key={i} className="flex gap-2">
-                  <span className="text-ink-quaternary w-6">{i + 1}.</span>
-                  <span className={t === null ? 'text-ink-tertiary' : 'text-ink'}>
-                    {t === null ? 'Error' : `${t} ms`}
-                  </span>
-                </div>
-              ))}
+        {/* Ping Section - Footer */}
+        <div className="bg-surface-light border-t" style={{ borderColor: 'var(--card-border)' }}>
+          <div className="px-4 sm:px-6 py-5 sm:py-6 flex flex-col gap-4">
+            <div className="flex items-center gap-2 text-sm font-semibold text-ink">
+              <Radio className="w-4 h-4 text-ink-secondary" />
+              Custom Ping Test
             </div>
+            
+            <div className="flex gap-2 sm:gap-3 items-stretch sm:items-center flex-col sm:flex-row">
+              <input
+                type="text"
+                placeholder="https://www.google.com"
+                className="input w-full sm:flex-1 min-w-0 text-xs sm:text-sm font-mono shadow-inner"
+                style={{ backgroundColor: 'var(--color-surface)' }}
+                value={pingHost}
+                onChange={(e) => setPingHost(e.target.value)}
+                disabled={pinging}
+                onKeyDown={(e) => e.key === 'Enter' && startPing()}
+              />
+              <div className="flex gap-2 sm:gap-3">
+                <input
+                  type="number"
+                  min="1"
+                  max="20"
+                  value={pingCount}
+                  onChange={(e) => setPingCount(parseInt(e.target.value))}
+                  disabled={pinging}
+                  className="input w-16 sm:w-20 text-xs sm:text-sm text-center shadow-inner"
+                  style={{ backgroundColor: 'var(--color-surface)' }}
+                />
+                <Button variant="primary" onClick={startPing} disabled={pinging} loading={pinging} className="flex-1 sm:flex-none flex items-center justify-center gap-2 text-xs sm:text-sm px-4">
+                  {!pinging && <Send className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
+                  {pinging ? 'Pinging…' : 'Ping Target'}
+                </Button>
+              </div>
+            </div>
+            
+            <div className="flex items-center justify-between mt-1">
+              <span className="font-mono text-ink-tertiary text-[10px] sm:text-xs bg-surface px-2 py-1 rounded-md border" style={{ borderColor: 'var(--card-border)' }}>
+                {pingStats}
+              </span>
+            </div>
+
+            {/* Ping results Grid */}
+            {pingResults.length > 0 && (
+              <div className="mt-2 rounded-lg p-3 sm:p-4 border" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--card-border)' }}>
+                <div className="font-mono text-[10px] sm:text-xs grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3">
+                  {pingResults.map((t, i) => (
+                    <div key={i} className="flex items-center justify-between gap-2 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-md shadow-sm" style={{ backgroundColor: 'var(--color-surface-light)', border: '1px solid rgba(255,255,255,0.03)' }}>
+                      <span className="text-ink-quaternary">#{i + 1}</span>
+                      <span className={t === null ? 'text-red-400 font-bold' : 'text-ink font-medium'}>
+                        {t === null ? 'ERR' : `${t}ms`}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </Card>
 
       <LatencyProbeModal 
