@@ -485,11 +485,7 @@ export const useDeviceInfo = () => {
     else if (/Mac OS X/.test(ua)) os = 'macOS';
     else if (/Android/.test(ua)) os = 'Android';
     else if (/iPhone|iPad/.test(ua)) os = 'iOS / iPadOS';
-    else if (/Linux/.test(ua)) {
-      // Many mobile browsers mask as Linux. Check touch points as a hint.
-      if (navigator.maxTouchPoints > 0) os = 'Android / Mobile';
-      else os = 'Linux';
-    }
+    else if (/Linux/.test(ua)) os = 'Linux';
 
     let browser = 'Unknown';
     if (/Edg\//.test(ua)) browser = 'Microsoft Edge';
@@ -547,99 +543,4 @@ export const useBrowserCapabilities = () => {
   }, []);
 
   return capabilities;
-};
-
-export const useDeviceTelemetry = () => {
-  const [telemetry, setTelemetry] = useState({
-    battery: null,
-    orientation: { alpha: 0, beta: 0, gamma: 0 },
-    memory: null,
-    permissionStatus: 'unknown'
-  });
-
-  const requestPermissions = async () => {
-    // iOS 13+ requires explicit permission for DeviceOrientation
-    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-      try {
-        const response = await DeviceOrientationEvent.requestPermission();
-        setTelemetry(prev => ({ ...prev, permissionStatus: response }));
-        return response === 'granted';
-      } catch (err) {
-        console.error('DeviceOrientation permission error:', err);
-        setTelemetry(prev => ({ ...prev, permissionStatus: 'denied' }));
-        return false;
-      }
-    }
-    // Android/Desktop generally don't require the requestPermission() call but might still need user interaction
-    setTelemetry(prev => ({ ...prev, permissionStatus: 'granted' }));
-    return true;
-  };
-
-  useEffect(() => {
-    // Check if permission already exists or if it's not required
-    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission !== 'function') {
-       setTelemetry(prev => ({ ...prev, permissionStatus: 'granted' }));
-    }
-    // 1. Battery API
-    let batteryHandler = null;
-    if ('getBattery' in navigator) {
-      navigator.getBattery().then((batt) => {
-        const updateBattery = () => {
-          setTelemetry((prev) => ({
-            ...prev,
-            battery: {
-              level: Math.round(batt.level * 100),
-              charging: batt.charging,
-              chargingTime: batt.chargingTime,
-              dischargingTime: batt.dischargingTime,
-            },
-          }));
-        };
-        updateBattery();
-        batt.addEventListener('levelchange', updateBattery);
-        batt.addEventListener('chargingchange', updateBattery);
-        batteryHandler = { batt, updateBattery };
-      });
-    }
-
-    // 2. Orientation API
-    const handleOrientation = (e) => {
-      setTelemetry((prev) => ({
-        ...prev,
-        orientation: {
-          alpha: Math.round(e.alpha || 0),
-          beta: Math.round(e.beta || 0),
-          gamma: Math.round(e.gamma || 0),
-        },
-      }));
-    };
-    window.addEventListener('deviceorientation', handleOrientation);
-
-    // 3. Memory API (Chrome specific)
-    const updateMemory = () => {
-      if (performance && performance.memory) {
-        setTelemetry((prev) => ({
-          ...prev,
-          memory: {
-            used: Math.round(performance.memory.usedJSHeapSize / 1048576),
-            total: Math.round(performance.memory.totalJSHeapSize / 1048576),
-            limit: Math.round(performance.memory.jsHeapLimit / 1048576),
-          },
-        }));
-      }
-    };
-    const memInterval = setInterval(updateMemory, 5000);
-    updateMemory();
-
-    return () => {
-      if (batteryHandler) {
-        batteryHandler.batt.removeEventListener('levelchange', batteryHandler.updateBattery);
-        batteryHandler.batt.removeEventListener('chargingchange', batteryHandler.updateBattery);
-      }
-      window.removeEventListener('deviceorientation', handleOrientation);
-      clearInterval(memInterval);
-    };
-  }, []);
-
-  return { ...telemetry, requestPermissions };
 };
