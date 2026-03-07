@@ -1,0 +1,179 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Theme Variables ─── */
+:root {
+  /* Light mode (default) */
+  --color-canvas: #ffffff;
+  --color-surface: #f5f5f5;
+  --color-surface-light: #ebebeb;
+  --color-surface-lighter: #e0e0e0;
+  --color-ink: #0a0a0a;
+  --color-ink-secondary: #555555;
+  --color-ink-tertiary: #888888;
+  --color-ink-quaternary: #bbbbbb;
+  --color-accent: #0a0a0a;
+  --color-border: rgba(0, 0, 0, 0.08);
+  --glow-color: rgba(0, 0, 0, 0.03);
+  --glow-color-strong: rgba(0, 0, 0, 0.06);
+  --shadow-card: 0 0 0 1px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.06);
+  --shadow-card-lg: 0 0 0 1px rgba(0,0,0,0.08), 0 4px 16px rgba(0,0,0,0.08);
+  --btn-primary-bg: #0a0a0a;
+  --btn-primary-text: #ffffff;
+  --icon-bg: rgba(0, 0, 0, 0.06);
+  --icon-border: rgba(0, 0, 0, 0.1);
+  --card-border: rgba(0, 0, 0, 0.06);
+  --row-border: rgba(0, 0, 0, 0.06);
+  --badge-bg: rgba(0, 0, 0, 0.06);
+  --map-filter: grayscale(0.2) contrast(1.1);
+}
+
+.dark {
+  --color-canvas: #000000;
+  --color-surface: #0a0a0a;
+  --color-surface-light: #141414;
+  --color-surface-lighter: #1e1e1e;
+  --color-ink: #ffffff;
+  --color-ink-secondary: #a0a0a0;
+  --color-ink-tertiary: #707070;
+  --color-ink-quaternary: #404040;
+  --color-accent: #ffffff;
+  --color-border: rgba(255, 255, 255, 0.06);
+  --glow-color: rgba(255, 255, 255, 0.03);
+  --glow-color-strong: rgba(255, 255, 255, 0.06);
+  --shadow-card: 0 0 0 1px rgba(255,255,255,0.06), 0 1px 3px rgba(0,0,0,0.5);
+  --shadow-card-lg: 0 0 0 1px rgba(255,255,255,0.08), 0 4px 16px rgba(0,0,0,0.6);
+  --btn-primary-bg: #ffffff;
+  --btn-primary-text: #000000;
+  --icon-bg: rgba(255, 255, 255, 0.08);
+  --icon-border: rgba(255, 255, 255, 0.1);
+  --card-border: rgba(255, 255, 255, 0.06);
+  --row-border: rgba(255, 255, 255, 0.04);
+  --badge-bg: rgba(255, 255, 255, 0.1);
+  --map-filter: grayscale(1) invert(0.92) brightness(0.6) contrast(1.8);
+}
+
+/* ─── Base ─── */
+@layer base {
+  * {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-canvas text-ink font-sans;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+
+  h1 { @apply text-4xl font-bold tracking-tight; }
+  h2 { @apply text-2xl font-semibold tracking-tight; }
+  h3 { @apply text-xl font-semibold tracking-tight; }
+  button { @apply transition-all duration-200; }
+  ::selection { background: var(--badge-bg); }
+}
+
+/* ─── Components ─── */
+@layer components {
+  .card {
+    background: var(--color-surface);
+    border: 1px solid var(--card-border);
+    box-shadow: var(--shadow-card);
+    @apply rounded-xl transition-all duration-300;
+  }
+  .card:hover {
+    box-shadow: var(--shadow-card-lg);
+    border-color: var(--icon-border);
+  }
+
+  .card-header {
+    border-bottom: 1px solid var(--card-border);
+    @apply flex items-center justify-between mb-4 pb-4;
+  }
+  .card-title { @apply text-lg font-semibold text-ink; }
+
+  .btn {
+    @apply px-4 py-2 rounded-lg font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-1;
+  }
+  .btn-primary {
+    background: var(--btn-primary-bg);
+    color: var(--btn-primary-text);
+  }
+  .btn-primary:hover { opacity: 0.9; }
+  .btn-secondary {
+    background: var(--color-surface-light);
+    color: var(--color-ink);
+    border: 1px solid var(--card-border);
+  }
+  .btn-secondary:hover { background: var(--color-surface-lighter); }
+
+  .badge {
+    background: var(--badge-bg);
+    color: var(--color-ink);
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .table { @apply w-full text-sm border-collapse; }
+  .table thead { background: var(--color-surface-light); }
+  .table th {
+    border-bottom: 1px solid var(--card-border);
+    @apply px-4 py-3 text-left font-medium text-ink-tertiary;
+  }
+  .table td {
+    border-bottom: 1px solid var(--row-border);
+    @apply px-4 py-3 text-ink-secondary;
+  }
+  .table tbody tr:hover { background: var(--badge-bg); }
+
+  .input {
+    background: var(--color-surface-light);
+    border: 1px solid var(--card-border);
+    color: var(--color-ink);
+    @apply w-full px-3 py-2 rounded-lg placeholder-ink-quaternary focus:outline-none focus:ring-2 transition-all duration-200;
+  }
+  .input:disabled { @apply opacity-40 cursor-not-allowed; }
+
+  .select {
+    background: var(--color-surface-light);
+    border: 1px solid var(--card-border);
+    color: var(--color-ink);
+    @apply w-full px-3 py-2 rounded-lg focus:outline-none focus:ring-2 transition-all duration-200;
+  }
+
+  .section-label { @apply text-xs font-semibold tracking-widest text-ink-quaternary uppercase mb-4 mt-8; }
+
+  .live-pill {
+    background: var(--badge-bg);
+    border: 1px solid var(--icon-border);
+    @apply inline-flex items-center gap-2 px-3 py-1.5 text-ink rounded-full text-xs font-medium;
+  }
+  .live-pill::before {
+    content: '';
+    background: var(--color-ink);
+    @apply w-1.5 h-1.5 rounded-full animate-breathe;
+  }
+
+  .note-box {
+    background: var(--color-surface-light);
+    border: 1px solid var(--row-border);
+    @apply mt-4 p-4 rounded-lg text-xs text-ink-tertiary leading-relaxed;
+  }
+  .note-box code {
+    background: var(--badge-bg);
+    @apply font-mono text-ink px-1.5 py-0.5 rounded;
+  }
+
+  .skeleton { background: var(--color-surface-light); @apply animate-pulse rounded-lg; }
+  .form-input { @apply input; }
+}
+
+/* ─── Utilities ─── */
+@layer utilities {
+  .flex-center { @apply flex items-center justify-center; }
+  .flex-between { @apply flex items-center justify-between; }
+  .grid-auto { @apply grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4; }
+  .text-glow { text-shadow: 0 0 30px var(--glow-color-strong); }
+}
