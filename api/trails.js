@@ -38,7 +38,7 @@ export default async function handler(req, res) {
 
     // ── POST: Add a waypoint to today's trail ──
     if (req.method === 'POST') {
-      const { point, email } = req.body;
+      const { point, email, userName, userPicture } = req.body;
       if (!point || !point.lat || !point.lng) {
         return res.status(400).json({ error: 'Invalid point data' });
       }
@@ -56,10 +56,10 @@ export default async function handler(req, res) {
       const trail = await Trail.findOneAndUpdate(
         { userId, date: today },
         { 
-          $setOnInsert: { email, createdAt: new Date() },
+          $setOnInsert: { createdAt: new Date() },
           $push: { points: point },
           $inc: { totalDistance: distToAdd },
-          $set: { updatedAt: new Date() }
+          $set: { updatedAt: new Date(), email, userName, userPicture }
         },
         { upsert: true, new: true, runValidators: true }
       );
@@ -69,7 +69,7 @@ export default async function handler(req, res) {
 
     // ── PUT: Update entire trail (edits / deletions) ──
     if (req.method === 'PUT') {
-      const { trail: newPoints, email } = req.body;
+      const { trail: newPoints, email, userName, userPicture } = req.body;
       if (!Array.isArray(newPoints)) {
         return res.status(400).json({ error: 'Invalid trail data' });
       }
@@ -87,7 +87,9 @@ export default async function handler(req, res) {
             points: newPoints, 
             totalDistance, 
             updatedAt: new Date(),
-            email // Ensure email is saved/updated
+            email, // Ensure email is saved/updated
+            userName,
+            userPicture
           },
           $setOnInsert: { createdAt: new Date() }
         },

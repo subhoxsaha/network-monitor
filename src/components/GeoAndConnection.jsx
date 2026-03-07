@@ -13,6 +13,8 @@ import TooltipText from './TooltipText';
 import { useCopy } from '../hooks/useCustom';
 import { getCookie, setCookie } from '../utils/cookies';
 import toast from 'react-hot-toast'; // Added toast import
+import { useAuth } from '../context/AuthContext';
+import { apiCall } from '../lib/api';
 
 const MAP_TYPES = [
   { id: 'roadmap', label: 'Default', icon: MapIcon, url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', maxZoom: 19, attribution: '© OpenStreetMap' },
@@ -41,6 +43,54 @@ const GeoAndConnection = () => {
   const mapRef = useRef(null);
   const selectedTheme = MAP_TYPES.find(t => t.id === mapType) || MAP_TYPES[0];
   const { copy } = useCopy();
+  const { user } = useAuth();
+  const [activeUsers, setActiveUsers] = useState([]);
+
+  // Fetch active users on interval
+  useEffect(() => {
+    if (!user?.sub) return;
+
+    const fetchActiveUsers = async () => {
+      try {
+        const res = await apiCall('GET', user.sub, '/api/users/active');
+        if (res?.activeUsers) setActiveUsers(res.activeUsers);
+      } catch (err) {
+        console.error('Failed to fetch active users:', err);
+      }
+    };
+
+    fetchActiveUsers();
+    const interval = setInterval(fetchActiveUsers, 10000); // Poll every 10s
+    return () => clearInterval(interval);
+  }, [user?.sub]);
+
+  // Factory for multiplayer avatars
+  const getActiveUserIcon = useCallback((u) => {
+    if (u.picture) {
+      return L.divIcon({
+        className: 'custom-leaflet-marker',
+        html: `
+          <div style="width: 28px; height: 28px; border-radius: 50%; padding: 2px; background: linear-gradient(135deg, #0a84ff, #8a2be2); box-shadow: 0 4px 12px rgba(0,0,0,0.5); transform: translateY(-4px); display: flex; align-items: center; justify-content: center;">
+            <img src="${u.picture}" style="width: 100%; height: 100%; border-radius: 50%; border: 2px solid white; object-fit: cover;" />
+          </div>
+        `,
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
+        popupAnchor: [0, -14],
+      });
+    }
+    return L.divIcon({
+      className: 'custom-leaflet-marker',
+      html: `
+        <div style="width: 24px; height: 24px; background-color: #8a2be2; border: 2.5px solid white; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 12px; transform: translateY(-4px);">
+          ${u.name.charAt(0).toUpperCase()}
+        </div>
+      `,
+      iconSize: [24, 24],
+      iconAnchor: [12, 12],
+      popupAnchor: [0, -12],
+    });
+  }, []);
 
   // Auto-request GPS on mount
   useEffect(() => {
@@ -256,6 +306,22 @@ const GeoAndConnection = () => {
                     </div>
                   </Popup>
                 </Marker>
+
+                {/* Render other active users */}
+                {activeUsers.map(u => (
+                  <Marker 
+                    key={u.userId}
+                    position={[u.lastLocation.lat, u.lastLocation.lng]}
+                    icon={getActiveUserIcon(u)}
+                  >
+                    <Popup className="custom-popup" closeButton={false}>
+                      <div style={{ fontFamily: 'Inter, sans-serif', padding: '2px', minWidth: '130px' }}>
+                        <div style={{ fontWeight: 700, fontSize: '13px', color: '#1c1c1e', marginBottom: '2px' }}>{u.name}</div>
+                        <div style={{ fontSize: '11px', color: '#636366' }}>Active {new Date(u.lastActive).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                      </div>
+                    </Popup>
+                  </Marker>
+                ))}
               </MapContainer>
             </div>
 

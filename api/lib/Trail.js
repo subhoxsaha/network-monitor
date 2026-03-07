@@ -12,6 +12,8 @@ const TrailPointSchema = new mongoose.Schema({
 const TrailSchema = new mongoose.Schema({
   userId: { type: String, required: true, index: true },
   email: { type: String },
+  userName: { type: String },
+  userPicture: { type: String },
   date: { type: String, required: true, index: true }, // YYYY-MM-DD
   points: [TrailPointSchema],
   totalDistance: { type: Number, default: 0 },

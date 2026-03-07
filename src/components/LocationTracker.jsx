@@ -192,11 +192,15 @@ const LocationTracker = () => {
         setTrail(cloudPoints);
         saveTrailToStorage(cloudPoints);
       } 
-      // If cloud is empty but we have local points, sync THEM to the cloud
       else if (trail.length > 0) {
         setCloudSyncing(true);
         // PUT the whole trail to bootstrap it
-        apiCall('PUT', user.sub, { trail, email: user.email }).finally(() => setCloudSyncing(false));
+        apiCall('PUT', user.sub, '/api/trails', { 
+          trail, 
+          email: user.email,
+          userName: user.name,
+          userPicture: user.picture
+        }).finally(() => setCloudSyncing(false));
       }
     }
     
@@ -231,7 +235,12 @@ const LocationTracker = () => {
     setLoading(false);
     if (user?.sub) {
       setCloudSyncing(true);
-      const res = await apiCall('POST', user.sub, '/api/trails', { point, email: user.email });
+      const res = await apiCall('POST', user.sub, '/api/trails', { 
+        point, 
+        email: user.email,
+        userName: user.name,
+        userPicture: user.picture
+      });
       setCloudSyncing(false);
       
       if (res.error) {
@@ -275,7 +284,12 @@ const LocationTracker = () => {
       const newTrail = prev.filter((_, i) => i !== idx);
       if (user?.sub) {
         setCloudSyncing(true);
-        apiCall('PUT', user.sub, '/api/trails', { trail: newTrail, email: user.email }).finally(() => setCloudSyncing(false));
+        apiCall('PUT', user.sub, '/api/trails', { 
+          trail: newTrail, 
+          email: user.email,
+          userName: user.name,
+          userPicture: user.picture
+        }).finally(() => setCloudSyncing(false));
       }
       return newTrail;
     });
@@ -290,7 +304,12 @@ const LocationTracker = () => {
       newTrail[idx] = { ...newTrail[idx], label: editLabel || `Waypoint #${idx + 1}` };
       if (user?.sub) {
         setCloudSyncing(true);
-        apiCall('PUT', user.sub, '/api/trails', { trail: newTrail, email: user.email }).finally(() => setCloudSyncing(false));
+        apiCall('PUT', user.sub, '/api/trails', { 
+          trail: newTrail, 
+          email: user.email,
+          userName: user.name,
+          userPicture: user.picture
+        }).finally(() => setCloudSyncing(false));
       }
       return newTrail;
     });
