@@ -1,5 +1,5 @@
 // Network API hooks
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 // Browser Geolocation API — requests user permission for precise GPS
 export const useBrowserGeolocation = () => {
@@ -8,8 +8,15 @@ export const useBrowserGeolocation = () => {
   const [permissionStatus, setPermissionStatus] = useState('prompt');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [heading, setHeading] = useState(0); // Stable compass heading
+
+  // Store last geocoded point to avoid redundant fetches
+  const lastGeocodedRef = useRef({ lat: 0, lng: 0 });
+  const lastOrientationUpdateRef = useRef(0);
+  const watchIdRef = useRef(null);
 
   useEffect(() => {
+    // Check permission status on mount
     if (navigator.permissions && navigator.permissions.query) {
       navigator.permissions.query({ name: 'geolocation' }).then((result) => {
         setPermissionStatus(result.state);
@@ -19,6 +26,49 @@ export const useBrowserGeolocation = () => {
         }
       }).catch(() => {});
     }
+
+    // Device Orientation (Compass) - Throttled to ~30fps for performance
+    const handleOrientation = (e) => {
+      const now = performance.now();
+      if (now - lastOrientationUpdateRef.current < 32) return; // ~30fps
+      lastOrientationUpdateRef.current = now;
+
+      // Use webkitCompassHeading for iOS, alpha for others
+      const h = e.webkitCompassHeading || (360 - e.alpha);
+      if (h !== undefined && h !== null) {
+        setHeading(h);
+      }
+    };
+
+    const startOrientation = async () => {
+      // iOS 13+ requires explicit permission for Device Orientation
+      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        try {
+          const response = await DeviceOrientationEvent.requestPermission();
+          if (response === 'granted') {
+            window.addEventListener('deviceorientation', handleOrientation, true);
+          }
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error('DeviceOrientation permission error:', err);
+        }
+      } else {
+        // Non-iOS or older iOS
+        window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+        window.addEventListener('deviceorientation', handleOrientation, true);
+      }
+    };
+
+    startOrientation();
+
+    // Cleanup on component unmount
+    return () => {
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+      }
+      window.removeEventListener('deviceorientation', handleOrientation, true);
+      window.removeEventListener('deviceorientationabsolute', handleOrientation, true);
+    };
   }, []);
 
   const requestLocation = useCallback(() => {
@@ -37,7 +87,7 @@ export const useBrowserGeolocation = () => {
         accuracy: pos.coords.accuracy ? Math.round(pos.coords.accuracy) : null,
         altitude: pos.coords.altitude,
         altitudeAccuracy: pos.coords.altitudeAccuracy ? Math.round(pos.coords.altitudeAccuracy) : null,
-        heading: pos.coords.heading,
+        heading: pos.coords.heading, // Natural GPS heading (only when moving)
         speed: pos.coords.speed,
         timestamp: new Date(pos.timestamp).toLocaleTimeString(),
       };
@@ -45,51 +95,76 @@ export const useBrowserGeolocation = () => {
       setPermissionStatus('granted');
       setLoading(false);
 
-      // Reverse Geocode
-      fetch(`https://nominatim.openstreetmap.org/reverse?lat=${newPos.latitude}&lon=${newPos.longitude}&format=json`, {
-        headers: { 'Accept-Language': 'en-US,en;q=0.9' }
-      })
-        .then(res => res.json())
-        .then(data => {
-          if (data.address) {
-            setAddress({
-              street: data.address.road || data.address.pedestrian || '',
-              suburb: data.address.suburb || data.address.neighbourhood || '',
-              city: data.address.city || data.address.town || data.address.village || '',
-              state: data.address.state || '',
-              country: data.address.country || '',
-              postcode: data.address.postcode || '',
-              displayString: data.display_name
-            });
-          }
+      // Reverse Geocode - Only if user has moved significantly (> 10m approx)
+      const latDiff = Math.abs(newPos.latitude - lastGeocodedRef.current.lat);
+      const lngDiff = Math.abs(newPos.longitude - lastGeocodedRef.current.lng);
+      
+      if (latDiff > 0.0001 || lngDiff > 0.0001) { // Roughly 10 meters
+        lastGeocodedRef.current = { lat: newPos.latitude, lng: newPos.longitude };
+        fetch(`https://nominatim.openstreetmap.org/reverse?lat=${newPos.latitude}&lon=${newPos.longitude}&format=json`, {
+          headers: { 'Accept-Language': 'en-US,en;q=0.9' }
         })
-        .catch(() => {});
+          .then(res => res.json())
+          .then(data => {
+            if (data.address) {
+              setAddress({
+                street: data.address.road || data.address.pedestrian || '',
+                suburb: data.address.suburb || data.address.neighbourhood || '',
+                city: data.address.city || data.address.town || data.address.village || '',
+                state: data.address.state || '',
+                country: data.address.country || '',
+                postcode: data.address.postcode || '',
+                displayString: data.display_name
+              });
+            }
+          })
+          .catch(() => {});
+      }
     };
 
     const handleError = (err) => {
-      setError(err.message);
-      if (err.code === 1) setPermissionStatus('denied');
+      let msg = 'Unknown location error';
+      switch (err.code) {
+        case 1: 
+          msg = 'Permission Denied: Please enable location access in your browser settings.';
+          setPermissionStatus('denied');
+          break;
+        case 2:
+          msg = 'Position Unavailable: Satellite or network signal lost.';
+          break;
+        case 3:
+          msg = 'Request Timeout: GPS signal taking too long. Try moving outdoors.';
+          break;
+        default:
+          msg = err.message || 'GPS tracking failed';
+      }
+      setError(msg);
       setLoading(false);
     };
 
-    // Force prompt on mobile browsers by calling get first
-    navigator.geolocation.getCurrentPosition(
-      (pos) => { handleSuccess(pos); watch(); },
-      (err) => { handleError(err); },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    );
-
     const watch = () => {
-      const watchId = navigator.geolocation.watchPosition(
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+      }
+      watchIdRef.current = navigator.geolocation.watchPosition(
         handleSuccess,
         handleError,
-        { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
       );
-      setTimeout(() => navigator.geolocation.clearWatch(watchId), 120000);
     };
+
+    // Unconditionally start continuous high-accuracy tracking
+    watch();
+
+    // Sometimes mobile browsers require a discrete get request to fire the prompt
+    navigator.geolocation.getCurrentPosition(
+      (pos) => { handleSuccess(pos); },
+      (err) => { /* Ignore discrete error since watcher is running */ },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
   }, []);
 
-  return { position, address, permissionStatus, loading, error, requestLocation };
+  return { position, address, permissionStatus, loading, error, heading, requestLocation };
 };
 
 export const usePublicIP = () => {
@@ -106,66 +181,7 @@ export const usePublicIP = () => {
       return raw;
     };
 
-    // API 1: ipapi.co
-    const tryIpApi = async () => {
-      const res = await fetch('https://ipapi.co/json/', { signal: AbortSignal.timeout(5000) });
-      const text = await res.text();
-      let data;
-      try { data = JSON.parse(text); } catch { throw new Error('ipapi.co returned non-JSON: ' + text.slice(0, 100)); }
-      if (data.error) throw new Error(data.reason || 'ipapi.co error');
-      return normalize({
-        ip: data.ip, version: data.version, country_name: data.country_name,
-        country_code: data.country_code, region: data.region, city: data.city,
-        postal: data.postal, timezone: data.timezone, org: data.org, asn: data.asn,
-        latitude: data.latitude, longitude: data.longitude,
-        currency: data.currency, currency_name: data.currency_name,
-        continent: data.continent_code, calling_code: data.country_calling_code,
-        languages: data.languages, capital: null, borders: null,
-        flag: null, domain: null, utcOffset: data.utc_offset,
-      }, 'ipapi.co');
-    };
-
-    // API 2: ipwho.is
-    const tryIpWhois = async () => {
-      const res = await fetch('https://ipwho.is/', { signal: AbortSignal.timeout(5000) });
-      const data = await res.json();
-      if (data.success === false) throw new Error('ipwho.is error');
-      return normalize({
-        ip: data.ip, version: data.type, country_name: data.country,
-        country_code: data.country_code, region: data.region, city: data.city,
-        postal: data.postal, timezone: data.timezone?.id, org: data.connection?.isp,
-        asn: data.connection?.asn ? `AS${data.connection.asn}` : null,
-        latitude: data.latitude, longitude: data.longitude,
-        currency: data.currency?.code, currency_name: data.currency?.name,
-        continent: data.continent, calling_code: data.calling_code,
-        languages: null, capital: data.capital, borders: data.borders,
-        flag: data.flag?.emoji, domain: data.connection?.domain,
-        utcOffset: data.timezone?.utc,
-      }, 'ipwho.is');
-    };
-
-    // API 3: freeipapi.com
-    const tryFreeIpApi = async () => {
-      const res = await fetch('https://freeipapi.com/api/json', { signal: AbortSignal.timeout(5000) });
-      const data = await res.json();
-      if (!data.ipAddress) throw new Error('freeipapi empty');
-      // eslint-disable-next-line no-console
-      console.log('[GeoIP] Using freeipapi.com (Fallback)', data);
-      return normalize({
-        ip: data.ipAddress, version: data.ipVersion === 6 ? 'IPv6' : 'IPv4',
-        country_name: data.countryName, country_code: data.countryCode,
-        region: data.regionName, city: data.cityName,
-        postal: data.zipCode, timezone: data.timeZone,
-        org: null, asn: null,
-        latitude: data.latitude, longitude: data.longitude,
-        currency: data.currency?.code, currency_name: data.currency?.name,
-        continent: data.continent, calling_code: null,
-        languages: data.language, capital: null, borders: null,
-        flag: null, domain: null, utcOffset: null,
-      }, 'freeipapi.com');
-    };
-
-    // API 4: geojs.io (fully supports localhost CORS)
+    // API 1: geojs.io (fully supports localhost CORS, highly reliable)
     const tryGeoJs = async () => {
       const res = await fetch('https://get.geojs.io/v1/ip/geo.json', { signal: AbortSignal.timeout(5000) });
       const data = await res.json();
@@ -180,7 +196,45 @@ export const usePublicIP = () => {
       }, 'geojs.io');
     };
 
-    // API 5: ipify (IP only, last resort)
+    // API 2: ipinfo.io (1k req/day free, extremely fast, good CORS)
+    const tryIpInfo = async () => {
+      const res = await fetch('https://ipinfo.io/json', { signal: AbortSignal.timeout(5000) });
+      const data = await res.json();
+      if (!data.ip) throw new Error('ipinfo empty');
+      
+      let lat = null, lon = null;
+      if (data.loc) {
+        const parts = data.loc.split(',');
+        lat = parseFloat(parts[0]);
+        lon = parseFloat(parts[1]);
+      }
+      
+      return normalize({
+        ip: data.ip, version: 'IPv4', country_name: null,
+        country_code: data.country, region: data.region, city: data.city,
+        postal: data.postal, timezone: data.timezone, org: data.org,
+        asn: data.org ? data.org.split(' ')[0] : null, latitude: lat, longitude: lon,
+        currency: null, currency_name: null, continent: null, calling_code: null,
+        languages: null, capital: null, borders: null, flag: null, domain: null, utcOffset: null,
+      }, 'ipinfo.io');
+    };
+
+    // API 3: db-ip.com (Free tier, good CORS, strong backup)
+    const tryDbIp = async () => {
+      const res = await fetch('https://api.db-ip.com/v2/free/self', { signal: AbortSignal.timeout(5000) });
+      const data = await res.json();
+      if (!data.ipAddress) throw new Error('db-ip empty');
+      return normalize({
+        ip: data.ipAddress, version: 'IPv4', country_name: data.countryName,
+        country_code: data.countryCode, region: data.stateProv, city: data.city,
+        postal: null, timezone: null, org: null,
+        asn: null, latitude: null, longitude: null,
+        currency: null, currency_name: null, continent: data.continentName, calling_code: null,
+        languages: null, capital: null, borders: null, flag: null, domain: null, utcOffset: null,
+      }, 'db-ip.com');
+    };
+
+    // API 4: ipify (IP only, absolute last resort)
     const tryIpify = async () => {
       const res = await fetch('https://api.ipify.org?format=json', { signal: AbortSignal.timeout(5000) });
       const data = await res.json();
@@ -196,7 +250,8 @@ export const usePublicIP = () => {
     };
 
     const fetchGeo = async () => {
-      const apis = [tryIpApi, tryIpWhois, tryFreeIpApi, tryGeoJs, tryIpify];
+      // Prioritize GeoJS, then IpInfo, then DbIp, finally Ipify
+      const apis = [tryGeoJs, tryIpInfo, tryDbIp, tryIpify];
       let data = null;
       let lastErr = null;
 

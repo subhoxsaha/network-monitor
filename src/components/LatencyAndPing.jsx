@@ -133,31 +133,29 @@ const LatencyAndPing = () => {
       </div>
 
       <Card className="p-0 overflow-hidden">
-        <div className="px-4 sm:px-6 py-3 sm:py-4 flex flex-col sm:flex-row gap-3 sm:items-center justify-between" style={{ borderBottom: '1px solid var(--card-border)' }}>
-          <div className="flex items-center gap-2 sm:gap-3">
-            <Zap className="w-5 h-5 text-ink" />
-            <h2 className="text-base sm:text-lg font-semibold text-ink">Latency Probe & Ping</h2>
+        <div className="px-5 py-4 flex flex-col sm:flex-row gap-4 sm:items-center justify-between border-b border-white/[0.06]">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-blue-500/10 border border-blue-500/20">
+              <Zap className="w-5 h-5 text-blue-500" />
+            </div>
+            <h2 className="text-lg font-bold text-ink">Latency Probe & Ping</h2>
           </div>
           
-          <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-3">
             <button
               onClick={() => setIsModalOpen(true)}
-              className="p-1.5 sm:p-2 text-ink-quaternary hover:text-ink transition-colors rounded-lg hover:bg-surface-light group relative"
+              className="p-2 text-ink-tertiary hover:text-ink transition-all rounded-xl hover:bg-white/5 active:scale-95 group"
               title="Edit Probes"
             >
-              <Settings className="w-4 h-4 sm:w-5 sm:h-5 group-hover:rotate-90 transition-transform duration-300" />
+              <Settings className="w-5 h-5 group-hover:rotate-90 transition-transform duration-500" />
             </button>
             <button
               onClick={() => setIsLive(!isLive)}
-              className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-full text-[10px] sm:text-xs font-medium transition-all duration-300 whitespace-nowrap"
-              style={{
-                background: isLive ? 'rgba(48,209,88,0.15)' : 'var(--icon-bg)',
-                color: isLive ? '#30d158' : 'var(--color-ink-tertiary)',
-                border: `1px solid ${isLive ? 'rgba(48,209,88,0.3)' : 'var(--icon-border)'}`
-              }}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-[11px] font-bold tracking-tight transition-all duration-300 active:scale-95 border
+                ${isLive ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-white/5 text-ink-tertiary border-white/10'}`}
             >
               <Radio className={`w-3.5 h-3.5 ${isLive ? 'animate-pulse' : ''}`} />
-              {isLive ? 'Live Mode Active' : 'Start Live Mode'}
+              {isLive ? 'LIVE ANALYTICS' : 'START PROBING'}
             </button>
           </div>
         </div>
@@ -217,8 +215,8 @@ const LatencyAndPing = () => {
         </div>
 
         {/* Ping Section - Footer */}
-        <div className="bg-surface-light border-t" style={{ borderColor: 'var(--card-border)' }}>
-          <div className="px-4 sm:px-6 py-5 sm:py-6 flex flex-col gap-4">
+        <div className="bg-white/[0.01] border-t border-white/[0.06]">
+          <div className="px-5 py-6 sm:px-6 flex flex-col gap-6">
             <div className="flex items-center gap-2 text-sm font-semibold text-ink">
               <Radio className="w-4 h-4 text-ink-secondary" />
               Custom Ping Test

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Send, Plus, Trash2, Code, Key, Link, FileJson, ArrowRight, ChevronDown, AlertCircle, Clock, HardDrive, Copy, X } from 'lucide-react';
 import Card from './Card';
 import Button from './Button';
+import Badge from './Badge';
 import { formatBytes } from '../utils/helpers';
 import { useCopy } from '../hooks/useCustom';
 
@@ -253,35 +254,56 @@ const HTTPTester = () => {
       </div>
 
       <Card className="p-0 overflow-hidden">
-        <div className="px-4 sm:px-6 py-4 flex items-center gap-3" style={{ borderBottom: '1px solid var(--card-border)' }}>
-          <Send className="w-5 h-5 text-ink" />
-          <h2 className="text-lg font-semibold text-ink">HTTP Request Tester</h2>
+        <div className="px-5 py-4 flex items-center justify-between border-b border-white/[0.06]">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-blue-500/10 border border-blue-500/20">
+              <Send className="w-5 h-5 text-blue-500" />
+            </div>
+            <h2 className="text-lg font-bold text-ink">HTTP Request Tester</h2>
+          </div>
         </div>
 
         {/* Method + URL */}
-        <div className="px-4 sm:px-6 py-4" style={{ borderBottom: '1px solid var(--card-border)' }}>
-          <div className="flex flex-col sm:flex-row gap-3 items-stretch">
-            <div className="flex flex-1 gap-2 sm:gap-3">
+        <div className="px-5 py-5 border-b border-white/[0.06] bg-white/[0.01]">
+          <div className="flex flex-col sm:flex-row gap-4 items-stretch">
+            <div className="flex flex-1 gap-3">
               <div className="relative shrink-0">
-                <select value={reqMethod} onChange={(e) => setReqMethod(e.target.value)} className="select w-24 sm:w-28 font-bold text-xs sm:text-sm appearance-none pr-8">
+                <select 
+                  value={reqMethod} 
+                  onChange={(e) => setReqMethod(e.target.value)} 
+                  className="w-28 sm:w-32 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 font-bold text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                >
                   {['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].map((m) => (
-                    <option key={m} value={m}>{m}</option>
+                    <option key={m} value={m} className="bg-zinc-900">{m}</option>
                   ))}
                 </select>
-                <ChevronDown className="w-4 h-4 absolute right-2 top-1/2 -translate-y-1/2 text-ink-quaternary pointer-events-none" />
+                <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-ink-quaternary pointer-events-none" />
               </div>
-              <input type="text" value={reqUrl} onChange={(e) => setReqUrl(e.target.value)} placeholder="https://api.example.com/endpoint" className="input flex-1 min-w-0 font-mono text-xs sm:text-sm" onKeyDown={(e) => e.key === 'Enter' && sendRequest()} />
+              <input 
+                type="text" 
+                value={reqUrl} 
+                onChange={(e) => setReqUrl(e.target.value)} 
+                placeholder="https://api.example.com/endpoint" 
+                className="input-text flex-1 min-w-0 font-mono text-sm px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/40" 
+                onKeyDown={(e) => e.key === 'Enter' && sendRequest()} 
+              />
             </div>
-            <Button variant="primary" onClick={sendRequest} disabled={loading} loading={loading} className="w-full sm:w-auto px-4 sm:px-6 flex justify-center items-center gap-2 whitespace-nowrap text-xs sm:text-sm">
-              {!loading && <Send className="w-4 h-4" />}
+            <Button 
+              variant="primary" 
+              onClick={sendRequest} 
+              disabled={loading} 
+              loading={loading} 
+              className="px-8"
+            >
+              {!loading && <Send className="w-4 h-4 mr-2" />}
               {loading ? 'Sending…' : 'Send'}
             </Button>
           </div>
         </div>
 
         {/* Tabs */}
-        <div className="px-2 sm:px-6 border-b" style={{ borderColor: 'var(--card-border)' }}>
-          <div className="flex gap-1 sm:gap-3 overflow-x-auto scrollbar-hide -mb-px">
+        <div className="px-4 sm:px-6 border-b border-white/[0.06]">
+          <div className="flex gap-2 overflow-x-auto scrollbar-hide -mb-px">
             {REQUEST_TABS.map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -289,13 +311,13 @@ const HTTPTester = () => {
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-3 text-[11px] sm:text-sm font-medium border-b-2 transition-colors whitespace-nowrap
-                    ${isActive ? 'border-ink text-ink' : 'border-transparent text-ink-tertiary hover:text-ink-secondary'}`}
+                  className={`flex items-center gap-2 px-4 py-4 text-sm font-semibold border-b-2 transition-all duration-300 whitespace-nowrap
+                    ${isActive ? 'border-blue-500 text-blue-500' : 'border-transparent text-ink-tertiary hover:text-ink-secondary hover:bg-white/[0.02]'}`}
                 >
-                  <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                  <Icon className={`w-4 h-4 ${isActive ? 'text-blue-500' : 'text-ink-tertiary'}`} />
                   {tab.label}
                   {tab.count > 0 && (
-                    <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ backgroundColor: isActive ? 'var(--badge-bg)' : 'var(--color-surface-light)' }}>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${isActive ? 'bg-blue-500/10 text-blue-500' : 'bg-white/5 text-ink-quaternary'}`}>
                       {tab.count}
                     </span>
                   )}
@@ -352,33 +374,29 @@ const HTTPTester = () => {
 
         {/* Response */}
         {responseStatus !== null && (
-          <div style={{ borderTop: '1px solid var(--card-border)' }}>
-            <div className="px-4 sm:px-6 py-3 flex flex-wrap items-center gap-x-4 gap-y-2" style={{ borderBottom: '1px solid var(--card-border)', backgroundColor: 'var(--color-surface-light)' }}>
-              <span className="text-[10px] sm:text-xs font-bold px-2.5 sm:px-3 py-1 rounded-full text-white shrink-0" style={{ 
-                backgroundColor: responseStatus >= 200 && responseStatus < 300 ? '#30d158' : 
-                                 responseStatus >= 400 ? '#ff453a' : 
-                                 responseStatus >= 300 ? '#ffd60a' : 'var(--color-ink-tertiary)' 
-              }}>
+          <div className="border-t border-white/[0.06]">
+            <div className="px-5 py-4 flex flex-wrap items-center gap-x-6 gap-y-3 bg-white/[0.02] border-b border-white/[0.06]">
+              <Badge variant={responseStatus >= 200 && responseStatus < 300 ? 'success' : responseStatus >= 400 ? 'error' : 'warning'}>
                 {responseStatus}
-              </span>
+              </Badge>
               {responseTime && (
-                <span className="flex items-center gap-1 sm:gap-1.5 text-[10px] sm:text-xs text-ink-tertiary shrink-0">
-                  <Clock className="w-3.5 h-3.5" />{responseTime}ms
-                </span>
+                <div className="flex items-center gap-2 text-xs text-ink-tertiary font-medium">
+                  <Clock className="w-4 h-4" />{responseTime}ms
+                </div>
               )}
               {responseSize !== null && (
-                <span className="flex items-center gap-1 sm:gap-1.5 text-[10px] sm:text-xs text-ink-tertiary shrink-0">
-                  <HardDrive className="w-3.5 h-3.5" />{formatBytes(responseSize)}
-                </span>
+                <div className="flex items-center gap-2 text-xs text-ink-tertiary font-medium">
+                  <HardDrive className="w-4 h-4" />{formatBytes(responseSize)}
+                </div>
               )}
-              <div className="w-full sm:w-auto mt-1 sm:mt-0 sm:ml-auto flex items-center justify-between sm:justify-end gap-3 shrink-0 border-t sm:border-t-0 pt-2 sm:pt-0" style={{ borderColor: 'var(--card-border)' }}>
-                <button onClick={() => copy(responseBody)} className="flex items-center gap-1.5 text-xs text-ink-quaternary hover:text-ink transition-colors px-2 py-1 -ml-2 sm:ml-0 rounded-md hover:bg-surface active:bg-surface-light">
-                  <Copy className="w-3.5 h-3.5" />Copy
-                </button>
-                <div className="w-px h-3 bg-white/[0.06] hidden sm:block"></div>
-                <button onClick={() => setResponseStatus(null)} className="flex items-center text-ink-quaternary hover:text-red-500 transition-colors px-2 py-1 -mr-2 sm:mr-0 rounded-md hover:bg-surface active:bg-surface-light" title="Clear Response">
-                  <X className="w-4 h-4" /> Clear
-                </button>
+              <div className="ml-auto flex items-center gap-4">
+                <Button variant="ghost" size="sm" onClick={() => copy(responseBody)} className="h-8">
+                  <Copy className="w-3.5 h-3.5 mr-2" />Copy
+                </Button>
+                <div className="w-px h-4 bg-white/[0.08]"></div>
+                <Button variant="ghost" size="sm" onClick={() => setResponseStatus(null)} className="h-8 hover:text-red-500">
+                  <X className="w-4 h-4 mr-2" /> Clear
+                </Button>
               </div>
             </div>
 

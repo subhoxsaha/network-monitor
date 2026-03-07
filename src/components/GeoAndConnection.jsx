@@ -1,63 +1,32 @@
-import React, { useState, useEffect } from 'react';
-import { MapPin, Wifi, Crosshair, Globe, Navigation, Locate, Copy } from 'lucide-react';
-import { MapContainer, TileLayer, Marker, Circle, Popup, useMap } from 'react-leaflet';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { MapPin, Wifi, Crosshair, Globe, Navigation, Locate, Copy, Map as MapIcon, Mountain, Layers, ChevronDown } from 'lucide-react';
+import { MapContainer, TileLayer, Marker, Popup, Circle as LeafletCircle, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useSharedPublicIP } from '../context/NetworkContext';
 import { useBrowserGeolocation, useConnectionDetails } from '../hooks/useNetwork';
 import Card from './Card';
+import Button from './Button';
+import Badge from './Badge';
 import WaveLoader from './WaveLoader';
 import TooltipText from './TooltipText';
 import { useCopy } from '../hooks/useCustom';
+import { getCookie, setCookie } from '../utils/cookies';
+import toast from 'react-hot-toast'; // Added toast import
 
-// Fix Leaflet default icon
-delete L.Icon.Default.prototype._getIconUrl;
+const MAP_TYPES = [
+  { id: 'roadmap', label: 'Default', icon: MapIcon, url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', maxZoom: 19, attribution: '© OpenStreetMap' },
+  { id: 'dark', label: 'Dark Mode', icon: Layers, url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', maxZoom: 19, attribution: '© CARTO' }
+];
 
-// Apple-blue pulsing dot marker
-const pulsingIcon = L.divIcon({
-  className: 'custom-marker',
-  html: `<div style="
-    position: relative;
-    width: 14px; height: 14px;
-    background: #0a84ff;
-    border-radius: 50%;
-    box-shadow: 0 0 0 2px var(--color-surface), 0 0 10px rgba(10,132,255,0.8);
-  ">
-    <div style="
-      position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-      border-radius: 50%; background: #0a84ff;
-      animation: pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
-    "></div>
-  </div>`,
-  iconSize: [14, 14],
-  iconAnchor: [7, 7]
-});
-
-// Green GPS marker
-const gpsIcon = L.divIcon({
-  className: 'custom-marker',
-  html: `<div style="
-    position: relative;
-    width: 16px; height: 16px;
-    background: #30d158;
-    border-radius: 50%;
-    box-shadow: 0 0 0 2px var(--color-surface), 0 0 12px rgba(48,209,88,0.9);
-  ">
-    <div style="
-      position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-      border-radius: 50%; background: #30d158;
-      animation: pulse-ring 1.5s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
-    "></div>
-  </div>`,
-  iconSize: [16, 16],
-  iconAnchor: [8, 8]
-});
-
-const FlyTo = ({ position, zoom }) => {
+// Helper to center the map on GPS/IP location dynamically
+const MapCenterer = ({ lat, lng, zoom }) => {
   const map = useMap();
   useEffect(() => {
-    if (position) map.flyTo(position, zoom || 13, { duration: 1.5 });
-  }, [position, zoom, map]);
+    if (lat != null && lng != null) {
+      map.flyTo([lat, lng], zoom, { duration: 1.5 });
+    }
+  }, [lat, lng, zoom, map]);
   return null;
 };
 
@@ -65,7 +34,12 @@ const GeoAndConnection = () => {
   const { geoData, ip, loading: geoLoading, error: geoError } = useSharedPublicIP();
   const geo = useBrowserGeolocation();
   const connData = useConnectionDetails();
-  const [useGPS, setUseGPS] = useState(true); // default to GPS
+  const [useGPS, setUseGPS] = useState(true);
+  const [mapType, setMapType] = useState(getCookie('nm_map_theme') || 'roadmap');
+  const [mapTypeOpen, setMapTypeOpen] = useState(false);
+  const [isMapReady, setIsMapReady] = useState(false);
+  const mapRef = useRef(null);
+  const selectedTheme = MAP_TYPES.find(t => t.id === mapType) || MAP_TYPES[0];
   const { copy } = useCopy();
 
   // Auto-request GPS on mount
@@ -107,212 +81,299 @@ const GeoAndConnection = () => {
     }
   };
 
+  const mapCenter = useMemo(() => (hasLocation ? [lat, lng] : [0, 0]), [hasLocation, lat, lng]);
+  const mapZoom = showingGPS ? 18 : 14;
+
+  // Create custom Blue Dot Icon with HTML
+  const customDotMarker = useMemo(() => {
+    const geoStatus = geo.permissionStatus; // Use actual permission status
+    const isGPSActive = showingGPS && geoStatus === 'granted';
+    const heading = geo.heading || 0;
+
+    // Animate compass arrow for active GPS
+    if (isGPSActive && heading != null) {
+      return L.divIcon({
+        className: 'custom-leaflet-marker',
+        html: `
+          <div style="transform: rotate(${heading}deg); width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; position: relative;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="#30d158" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="filter: drop-shadow(0px 1px 3px rgba(0,0,0,0.5)); transform: translateY(-4px);">
+              <path d="M12 2L2 22l10-4 10 4L12 2z" />
+            </svg>
+          </div>
+        `,
+        iconSize: [32, 32],
+        iconAnchor: [16, 16], // Center of SVG
+        popupAnchor: [0, -12],
+      });
+    }
+
+    // Default Circle for non-GPS or denied GPS
+    return L.divIcon({
+      className: 'custom-leaflet-marker',
+      html: `
+        <div style="width: 16px; height: 16px; background-color: ${isGPSActive ? '#30d158' : '#0a84ff'}; border: 2.5px solid white; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">
+        </div>
+      `,
+      iconSize: [16, 16],
+      iconAnchor: [8, 8],
+      popupAnchor: [0, -8],
+    });
+  }, [showingGPS, geo.permissionStatus, geo.position?.heading]);
+
+
   const TableRow = ({ label, value }) => (
-    <div className="py-2.5 flex justify-between gap-4" style={{ borderBottom: '1px solid var(--row-border)' }}>
-      <span className="text-ink-tertiary text-[10px] sm:text-xs whitespace-nowrap">{label}</span>
-      <span className="text-ink font-mono text-xs sm:text-sm text-right break-all">{value || '—'}</span>
+    <div className="py-2 sm:py-2.5 flex justify-between gap-3" style={{ borderBottom: '1px solid var(--row-border)' }}>
+      <span className="text-ink-quaternary text-[11px] sm:text-[11px] whitespace-nowrap shrink-0">{label}</span>
+      <span className="text-ink font-mono text-[11px] sm:text-xs text-right break-all">{value || '—'}</span>
     </div>
   );
 
   return (
-    <div className="space-y-6 animate-rise-in">
-      {/* Map + Geo row */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-        {/* Map — takes 3 columns */}
-        <Card className="p-0 overflow-hidden lg:col-span-3">
-          <div className="px-5 py-3.5 flex flex-col sm:flex-row gap-3 sm:items-center justify-between" style={{ borderBottom: '1px solid var(--card-border)' }}>
-            <div className="flex items-center gap-2.5">
-              <MapPin className="w-5 h-5" style={{ color: '#0a84ff' }} />
-              <h2 className="text-lg font-semibold text-ink">Your Location</h2>
-              <span className="text-[10px] sm:text-xs text-ink-quaternary ml-1">
-                {useGPS && hasGPS ? '📍 GPS' : '≈ IP-based'}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleGPSToggle}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
-                style={{
-                  background: useGPS && hasGPS ? 'rgba(48,209,88,0.15)' : 'var(--icon-bg)',
-                  color: useGPS && hasGPS ? '#30d158' : 'var(--color-ink-secondary)',
-                  border: `1px solid ${useGPS && hasGPS ? 'rgba(48,209,88,0.3)' : 'var(--icon-border)'}`,
-                }}
-              >
-                <Locate className="w-3.5 h-3.5" />
-                {geo.loading ? 'Getting GPS…' : useGPS && hasGPS ? 'GPS Active' : 'Use Precise GPS'}
-              </button>
-            </div>
-          </div>
+    <div className="space-y-5 animate-rise-in">
 
-          {/* GPS permission states */}
-          {useGPS && geo.permissionStatus === 'denied' && (
-            <div className="px-5 py-2.5 text-xs flex items-center gap-2" style={{ background: 'rgba(255,69,58,0.08)', color: '#ff453a' }}>
-              <span>⚠</span> Location permission denied. Enable it in browser settings → Site Permissions → Location.
-            </div>
-          )}
-
-          {useGPS && hasGPS && geo.position?.accuracy && (
-            <div className="px-5 py-2 text-xs text-ink-quaternary flex items-center gap-2" style={{ background: 'var(--color-surface-light)' }}>
-              <Navigation className="w-3 h-3" style={{ color: '#30d158' }} />
-              GPS accuracy: ±{Math.round(geo.position.accuracy)}m
-              {geo.position.altitude != null && ` · Alt: ${Math.round(geo.position.altitude)}m`}
-            </div>
-          )}
-
-          <div className="relative h-64 sm:h-80">
-            {geoLoading && !hasLocation ? (
-              <div className="absolute inset-0 flex items-center justify-center" style={{ background: 'var(--color-surface)' }}>
-                <WaveLoader text="Locating via network…" />
-              </div>
-            ) : !hasLocation ? (
-              <div className="absolute inset-0 flex items-center justify-center" style={{ background: 'var(--color-surface)' }}>
-                <div className="text-center text-ink-quaternary">
-                  <Globe className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                  <p className="text-sm">{geoError || 'Could not determine location'}</p>
-                </div>
-              </div>
-            ) : (
-              <>
-                {/* Sleek vignette overlay so the map blends into the dark card edges */}
-                <div 
-                  className="absolute inset-0 pointer-events-none z-[1000]" 
-                  style={{
-                    boxShadow: 'inset 0 0 40px rgba(0,0,0,0.4), inset 0 0 10px rgba(0,0,0,0.8)',
-                    borderBottom: '1px solid var(--card-border)'
-                  }} 
-                />
-                <MapContainer
-                  center={position}
-                  zoom={useGPS && hasGPS ? 18 : 13}
-                  maxZoom={19}
-                  style={{ height: '100%', width: '100%', filter: 'var(--map-filter, none)' }}
-                  zoomControl={true}
-                  className="leaflet-dark"
-                >
-                  <TileLayer
-                    attribution='&copy; CARTO'
-                    url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-                    maxZoom={19}
-                  />
-                  <FlyTo position={position} zoom={useGPS && hasGPS ? 18 : 13} />
-                  <Marker position={position} icon={useGPS && hasGPS ? gpsIcon : pulsingIcon}>
-                      <Popup>
-                      <div style={{ color: '#1c1c1e', fontFamily: 'Inter, sans-serif', minWidth: '170px' }}>
-                        <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '4px' }}>
-                          {useGPS && hasGPS ? '📍 Exact GPS Location' : '🌐 Approximate Location'}
-                        </div>
-                        <div style={{ fontSize: '11px', color: '#636366', lineHeight: 1.7 }}>
-                          {ip && !showingGPS && <div><b>IP:</b> {ip}</div>}
-                          
-                          {/* If showing GPS, show reverse geocoded address */}
-                          {showingGPS && geo.address ? (
-                            <>
-                              {geo.address.street && <div><b>Street:</b> {geo.address.street}</div>}
-                              {geo.address.suburb && <div><b>Suburb:</b> {geo.address.suburb}</div>}
-                              {geo.address.city && <div><b>City:</b> {geo.address.city}</div>}
-                              {geo.address.postcode && <div><b>Postcode:</b> {geo.address.postcode}</div>}
-                            </>
-                          ) : (
-                            /* Otherwise show IP-based geoData */
-                            <>
-                              {geoData?.city && geoData.city !== '—' && <div><b>City:</b> {geoData.city}</div>}
-                              {geoData?.region && geoData.region !== '—' && <div><b>Region:</b> {geoData.region}</div>}
-                              {geoData?.country && geoData.country !== '—' && <div><b>Country:</b> {geoData.country}</div>}
-                            </>
-                          )}
-                          
-                          {useGPS && hasGPS && geo.position?.accuracy && (
-                            <div><b>Accuracy:</b> ±{Math.round(geo.position.accuracy)}m</div>
-                          )}
-                        </div>
-                      </div>
-                    </Popup>
-                  </Marker>
-                  {/* Approximate range circle */}
-                  <Circle
-                    center={position}
-                    radius={accuracy}
-                    pathOptions={{
-                      color: useGPS && hasGPS ? '#30d158' : '#0a84ff',
-                      fillColor: useGPS && hasGPS ? '#30d158' : '#0a84ff',
-                      fillOpacity: 0.08,
-                      weight: 1.5,
-                      opacity: 0.3,
-                      dashArray: useGPS && hasGPS ? '2 4' : '6 4',
-                    }}
-                  />
-                </MapContainer>
-              </>
+      {/* ── Full-width Map Card ─────────────────────────────── */}
+      <Card className="p-0 overflow-hidden">
+        {/* Header */}
+        <div className="px-5 py-4 flex items-center justify-between border-b border-white/[0.06]">
+          <div className="flex items-center gap-2.5">
+            <MapPin className="w-4 h-4 text-blue-500" />
+            <h2 className="text-sm font-semibold text-ink">Your Location</h2>
+            {useGPS && hasGPS && (
+              <Badge variant="success" dot>GPS Active</Badge>
+            )}
+            {useGPS && hasGPS && geo.position?.accuracy && (
+              <span className="meta-text hidden sm:inline">±{Math.round(geo.position.accuracy)}m</span>
             )}
           </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant={useGPS && hasGPS ? 'success' : 'secondary'}
+              size="sm"
+              onClick={handleGPSToggle}
+              className="gap-1.5"
+            >
+              <Locate className="w-3.5 h-3.5" />
+              {geo.loading ? 'Finding…' : useGPS && hasGPS ? 'GPS On' : 'GPS Off'}
+            </Button>
+          </div>
+        </div>
 
-          {/* Location summary bar */}
-          {hasLocation && (
-            <div className="px-5 py-2.5 flex items-center gap-5 text-xs text-ink-tertiary flex-wrap" style={{ borderTop: '1px solid var(--card-border)', background: 'var(--glow-color)' }}>
-              {showingGPS && geo.address ? (
-                <>
-                  {geo.address.street && <span>{geo.address.street}</span>}
-                  {geo.address.suburb && <><span className="text-ink-quaternary">·</span><span>{geo.address.suburb}</span></>}
-                  {geo.address.city && <><span className="text-ink-quaternary">·</span><span>{geo.address.city}</span></>}
-                  <div className="ml-auto flex items-center gap-1.5 text-ink-quaternary font-mono">
-                    <Crosshair className="w-3 h-3 opacity-50" />
-                    {lat.toFixed(5)}, {lng.toFixed(5)}
-                    <button 
-                      onClick={() => copy(`${lat.toFixed(5)}, ${lng.toFixed(5)}`)}
-                      className="p-1.5 ml-1 hover:bg-surface hover:text-ink rounded transition-colors active:bg-surface-light"
-                      title="Copy Coordinates"
-                    >
-                      <Copy className="w-3 h-3" />
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  {geoData?.city && geoData.city !== '—' && <span>{geoData.city}</span>}
-                  {geoData?.region && geoData.region !== '—' && <><span className="text-ink-quaternary">·</span><span>{geoData.region}</span></>}
-                  {geoData?.country && geoData.country !== '—' && <><span className="text-ink-quaternary">·</span><span>{geoData.country}</span></>}
-                  <div className="ml-auto flex items-center gap-1.5 text-ink-quaternary font-mono">
-                    <Crosshair className="w-3 h-3 opacity-50" />
-                    {lat.toFixed(5)}, {lng.toFixed(5)}
-                    <button 
-                      onClick={() => copy(`${lat.toFixed(5)}, ${lng.toFixed(5)}`)}
-                      className="p-1.5 ml-1 hover:bg-surface hover:text-ink rounded transition-colors active:bg-surface-light"
-                      title="Copy Coordinates"
-                    >
-                      <Copy className="w-3 h-3" />
-                    </button>
-                  </div>
-                </>
+        {/* GPS denied banner */}
+        {useGPS && geo.permissionStatus === 'denied' && (
+          <div className="px-5 py-2 text-xs flex items-center gap-2" style={{ background: 'rgba(255,69,58,0.08)', color: '#ff453a' }}>
+            ⚠ Location permission denied — enable in browser Site Permissions.
+          </div>
+        )}
+
+        {/* Map — tall, full-width */}
+        <div className="relative" style={{ height: '28rem' }}>
+          {geoLoading && !hasLocation ? (
+            <div className="absolute inset-0 flex items-center justify-center" style={{ background: 'var(--color-surface)' }}>
+              <WaveLoader text="Locating via network…" />
+            </div>
+          ) : !hasLocation ? (
+            <div className="absolute inset-0 flex items-center justify-center" style={{ background: 'var(--color-surface)' }}>
+              <div className="text-center text-ink-quaternary">
+                <Globe className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                <p className="text-sm">{geoError || 'Could not determine location'}</p>
+              </div>
+            </div>
+          ) : (
+            <div className="absolute inset-0 z-0 bg-surface">
+              
+              {/* Loading Overlay */}
+              <div 
+                className="absolute inset-0 z-10 flex flex-col items-center justify-center transition-opacity duration-700 ease-in-out"
+                style={{ opacity: isMapReady ? 0 : 1, pointerEvents: isMapReady ? 'none' : 'auto' }}
+              >
+                <div className="w-10 h-10 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin mb-4" />
+                <p className="text-sm font-medium text-ink-secondary animate-pulse">Initializing Map Engine…</p>
+              </div>
+
+              {/* Full-bleed Map */}
+              <div 
+                className="absolute inset-0 z-0 transition-all duration-1000 ease-out"
+                style={{ 
+                  opacity: isMapReady ? 1 : 0, 
+                  filter: isMapReady ? 'blur(0px)' : 'blur(8px)',
+                  transform: isMapReady ? 'scale(1)' : 'scale(1.02)'
+                }}
+              >
+                <MapContainer
+                  ref={mapRef}
+                  center={mapCenter}
+                  zoom={mapZoom}
+                  zoomControl={false} // Disable default zoom controls to match sleek UI
+                  style={{ width: '100%', height: '100%' }}
+                  whenReady={() => setTimeout(() => setIsMapReady(true), 400)}
+                >
+                <TileLayer
+                  attribution={selectedTheme.attribution}
+                  url={selectedTheme.url}
+                  maxZoom={selectedTheme.maxZoom}
+                />
+
+                <MapCenterer lat={lat} lng={lng} zoom={mapZoom} />
+
+                <LeafletCircle
+                  center={mapCenter}
+                  radius={accuracy}
+                  pathOptions={{
+                    color: showingGPS ? '#30d158' : '#0a84ff',
+                    weight: 1,
+                    opacity: 0.3,
+                    fillColor: showingGPS ? '#30d158' : '#0a84ff',
+                    fillOpacity: 0.15,
+                  }}
+                  interactive={false}
+                />
+
+                <Marker position={mapCenter} icon={customDotMarker}>
+                  <Popup className="custom-popup" closeButton={false}>
+                    <div style={{ fontFamily: 'Inter, sans-serif', minWidth: '160px', padding: '2px' }}>
+                      <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '5px', color: '#1c1c1e' }}>
+                        {showingGPS ? '📍 Exact Location' : '🌐 Approx. Location'}
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#636366', lineHeight: 1.8 }}>
+                        {ip && !showingGPS && <div><b>IP:</b> {ip}</div>}
+                        {showingGPS && geo.address ? (
+                          <>
+                            {geo.address.street && <div className="truncate"><b>Street:</b> {geo.address.street}</div>}
+                            {geo.address.city && <div><b>City:</b> {geo.address.city}</div>}
+                            {geo.address.postcode && <div><b>Postal:</b> {geo.address.postcode}</div>}
+                          </>
+                        ) : (
+                          <>
+                            {geoData?.city && <div><b>City:</b> {geoData.city}</div>}
+                            {geoData?.region && <div><b>Region:</b> {geoData.region}</div>}
+                            {geoData?.country && <div><b>Country:</b> {geoData.country}</div>}
+                          </>
+                        )}
+                        {showingGPS && geo.position?.accuracy && (
+                          <div><b>Accuracy:</b> ±{Math.round(geo.position.accuracy)}m</div>
+                        )}
+                      </div>
+                    </div>
+                  </Popup>
+                </Marker>
+              </MapContainer>
+            </div>
+
+              {/* Address pill — bottom-left */}
+              {hasLocation && (
+                <div className="absolute bottom-3 left-3 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-medium max-w-[55%]"
+                  style={{ background: 'rgba(0,0,0,0.6)', color: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                  <Crosshair className="w-3 h-3 shrink-0 opacity-60" />
+                  <span className="truncate">
+                    {showingGPS && geo.address
+                      ? [geo.address.street, geo.address.city].filter(Boolean).join(', ')
+                      : `${lat.toFixed(5)}, ${lng.toFixed(5)}`}
+                  </span>
+                  <button onClick={() => copy(`${lat.toFixed(5)}, ${lng.toFixed(5)}`)} className="shrink-0 opacity-60 hover:opacity-100 transition-opacity">
+                    <Copy className="w-3 h-3" />
+                  </button>
+                </div>
               )}
+
+              {/* Re-center — Programmatically fly to coordinate when clicked */}
+              <button
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (lat != null && lng != null && mapRef.current) {
+                    mapRef.current.flyTo([lat, lng], mapZoom, { animate: true, duration: 1.5 });
+                    toast('Auto-locked on position', { id: 'recenter' });
+                  }
+                }}
+                title="Re-center"
+                className="absolute bottom-4 right-4 z-10 w-10 h-10 flex items-center justify-center rounded-full transition-all hover:scale-110 active:scale-95 bg-blue-600/90 hover:bg-blue-500 backdrop-blur-xl shadow-2xl shadow-blue-500/40 border border-white/20"
+              >
+                <Locate className="w-5 h-5 text-white" />
+              </button>
+
+              {/* Map Type Toggle Dropdown (Floating Top-Right) */}
+              <div className="absolute top-4 right-4 z-[1000] flex flex-col items-end gap-2">
+                <div className="relative group">
+                  <button
+                    onClick={() => setMapTypeOpen(!mapTypeOpen)}
+                    onBlur={() => setTimeout(() => setMapTypeOpen(false), 200)}
+                    className="flex items-center gap-2 px-3.5 py-2 rounded-full text-xs font-bold shadow-2xl transition-all hover:scale-105 active:scale-95 bg-zinc-900/80 backdrop-blur-2xl border border-white/10 text-white"
+                  >
+                    <selectedTheme.icon className="w-4 h-4 text-blue-400" />
+                    <span>Map Type</span>
+                    <ChevronDown className="w-3.5 h-3.5 transition-transform" style={{ transform: mapTypeOpen ? 'rotate(180deg)' : 'rotate(0deg)' }} />
+                  </button>
+
+                  {mapTypeOpen && (
+                    <div
+                      className="absolute top-full right-0 mt-2 p-1.5 rounded-2xl shadow-xl flex flex-col gap-1 min-w-[130px] animate-rise-in origin-top-right z-50 pointer-events-auto"
+                      style={{ background: 'rgba(28,28,30,0.95)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.1)' }}
+                    >
+                      {MAP_TYPES.map(({ id, label, icon: Icon }) => (
+                        <button
+                          key={id}
+                          onClick={() => { 
+                            setMapTypeOpen(false);
+                            if (mapType !== id) {
+                              setIsMapReady(false);
+                              setMapType(id);
+                              setCookie('nm_map_theme', id, 30); // Set cookie for map type
+                              setTimeout(() => setIsMapReady(true), 600);
+                            }
+                          }}
+                          className="flex items-center justify-between px-3 py-2 rounded-xl text-[11px] font-semibold w-full transition-colors hover:bg-white/10"
+                          style={{ color: mapType === id ? '#fff' : 'rgba(255,255,255,0.6)', background: mapType === id ? 'rgba(255,255,255,0.08)' : 'transparent' }}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <Icon className="w-3.5 h-3.5" style={{ color: mapType === id ? '#0a84ff' : 'inherit' }} />
+                            {label}
+                          </div>
+                          {mapType === id && <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Leaflet CSS Reset Overrides */}
+              <style dangerouslySetInnerHTML={{__html: `
+                .leaflet-container { font-family: 'Inter', sans-serif; background: var(--color-surface); z-index: 1; }
+                .custom-popup .leaflet-popup-content-wrapper { border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.15); }
+                .custom-popup .leaflet-popup-tip { box-shadow: 0 4px 16px rgba(0,0,0,0.15); }
+                .custom-popup .leaflet-popup-content { margin: 12px; }
+              `}} />
             </div>
           )}
-        </Card>
+        </div>
+      </Card>
 
-        {/* Geo details — takes 2 columns */}
-        <Card className="p-5 lg:col-span-2">
+      {/* ── Two-column: Geo + Connection ───────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+
+        <Card className="p-5" style={{ borderRadius: '16px' }}>
           <div className="flex items-center gap-2.5 mb-4">
             <div className="p-1.5 rounded-lg" style={{ background: 'var(--icon-bg)' }}>
-              <MapPin className="w-4 h-4" style={{ color: '#ff453a' }} />
+              <Globe className="w-4 h-4" style={{ color: '#ff453a' }} />
             </div>
-            <h2 className="text-base font-semibold text-ink">Geolocation &amp; ISP</h2>
+            <h2 className="text-sm font-semibold text-ink">Geolocation &amp; ISP</h2>
           </div>
           {geoLoading ? (
-            <WaveLoader text="Resolving location…" />
+            <WaveLoader text="Resolving…" />
           ) : geoError && !geoData ? (
             <div className="p-3 rounded-lg text-sm" style={{ background: 'rgba(255,69,58,0.08)', color: '#ff453a' }}>{geoError}</div>
           ) : geoData ? (
-            <div className="space-y-0">
+            <div>
               {showingGPS && geo.address ? (
                 <>
-                  <TableRow label="Country" value={geo.address.country} />
-                  <TableRow label="State/Region" value={geo.address.state} />
-                  <TableRow label="City/Town" value={geo.address.city} />
-                  <TableRow label="Suburb" value={geo.address.suburb} />
-                  <TableRow label="Street" value={geo.address.street} />
-                  <TableRow label="Postal" value={geo.address.postcode} />
+                  <TableRow label="Country" value={geo.address?.country || '—'} />
+                  <TableRow label="State" value={geo.address?.state || '—'} />
+                  <TableRow label="City" value={geo.address?.city || '—'} />
+                  <TableRow label="Suburb" value={geo.address?.suburb || '—'} />
+                  <TableRow label="Street" value={geo.address?.street || '—'} />
+                  <TableRow label="Postcode" value={geo.address?.postcode || '—'} />
+                  <TableRow label="Local Time" value={new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })} />
                   <TableRow label="Coordinates" value={`${lat.toFixed(6)}, ${lng.toFixed(6)}`} />
-                  <TableRow label="Accuracy" value={`±${Math.round(geo.position.accuracy)} meters`} />
-                  <TableRow label="Altitude" value={geo.position.altitude ? `${Math.round(geo.position.altitude)}m` : '—'} />
+                  <TableRow label="Accuracy" value={`±${Math.round(geo.position.accuracy)}m`} />
                 </>
               ) : (
                 <>
@@ -321,6 +382,7 @@ const GeoAndConnection = () => {
                   <TableRow label="City" value={geoData.city} />
                   <TableRow label="Postal" value={geoData.postal} />
                   <TableRow label="Timezone" value={geoData.timezone} />
+                  <TableRow label="Local Time" value={new Date().toLocaleTimeString('en-US', { timeZone: geoData.timezone !== '—' ? geoData.timezone : undefined, hour: '2-digit', minute: '2-digit', second: '2-digit' })} />
                   <TableRow label="ISP" value={geoData.isp} />
                   <TableRow label="ASN" value={geoData.asn} />
                   <TableRow label="Coordinates" value={geoData.coordinates} />
@@ -335,32 +397,31 @@ const GeoAndConnection = () => {
             </div>
           )}
         </Card>
-      </div>
 
-      {/* Connection details — full width */}
-      <Card className="p-5">
-        <div className="flex items-center gap-2.5 mb-4">
-          <div className="p-1.5 rounded-lg" style={{ background: 'var(--icon-bg)' }}>
-            <Wifi className="w-4 h-4" style={{ color: '#64d2ff' }} />
+        <Card className="p-5 sm:p-6">
+          <div className="flex items-center gap-2.5 mb-4">
+            <div className="p-2 rounded-xl bg-blue-500/10 border border-blue-500/20">
+              <Wifi className="w-4 h-4 text-blue-500" />
+            </div>
+            <h2 className="text-sm font-semibold text-ink">Connection Details</h2>
           </div>
-          <h2 className="text-base font-semibold text-ink">Connection Details</h2>
-        </div>
-        {connData ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-8">
-            <TableRow label="Type" value={connData.type} />
-            <TableRow label="Effective" value={connData.effective} />
-            <TableRow label="Downlink" value={connData.downlink} />
-            <TableRow label="RTT" value={connData.rtt} />
-            <TableRow label="Data Saver" value={connData.dataSaver} />
-            <TableRow label="Online" value={connData.online} />
-            <TableRow label="Protocol" value={connData.protocol} />
-            <TableRow label="Port" value={connData.port} />
-            <TableRow label="Host" value={connData.host} />
-          </div>
-        ) : (
-          <WaveLoader text="Detecting connection…" />
-        )}
-      </Card>
+          {connData ? (
+            <div>
+              <TableRow label="Type" value={connData.type} />
+              <TableRow label="Effective" value={connData.effective} />
+              <TableRow label="Downlink" value={connData.downlink} />
+              <TableRow label="RTT" value={connData.rtt} />
+              <TableRow label="Data Saver" value={connData.dataSaver} />
+              <TableRow label="Online" value={connData.online} />
+              <TableRow label="Protocol" value={connData.protocol} />
+              <TableRow label="Port" value={connData.port} />
+              <TableRow label="Host" value={connData.host} />
+            </div>
+          ) : (
+            <WaveLoader text="Detecting connection…" />
+          )}
+        </Card>
+      </div>
     </div>
   );
 };

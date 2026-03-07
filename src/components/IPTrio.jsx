@@ -4,6 +4,7 @@ import { useSharedPublicIP } from '../context/NetworkContext';
 import { usePublicIPv6, usePublicIPv4 } from '../hooks/useNetwork';
 import { useCopy } from '../hooks/useCustom';
 import Card from './Card';
+import Button from './Button';
 import WaveLoader from './WaveLoader';
 
 const useNetworkSpeed = () => {
@@ -99,14 +100,19 @@ const IPTrio = () => {
             <p className="text-sm text-ink-tertiary">
               {ipv4 ? 'Explicit IPv4 address' : ipSub}
             </p>
-            <button
-              onClick={() => copy(displayIp)}
-              className="mt-2 w-full px-4 py-2 rounded-lg transition-colors flex items-center justify-center gap-2 text-sm font-medium"
-              style={{ background: 'var(--color-surface-light)' }}
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                copy(displayIp);
+                toast.success('IPv4 copied to clipboard');
+              }}
+              className="mt-2 w-full"
+              aria-label={`Copy public IPv4 address ${displayIp || ''}`}
             >
-              <Copy className="w-4 h-4" />
-              Copy
-            </button>
+              <Copy className="w-3.5 h-3.5 mr-2" />
+              Copy IPv4
+            </Button>
           </div>
         )}
       </Card>
@@ -188,14 +194,19 @@ const IPTrio = () => {
               {ipv6 ? 'IPv6 connectivity detected' : 'IPv6 not available on this network'}
             </p>
             {ipv6 && (
-              <button
-                onClick={() => copy(ipv6)}
-                className="w-full px-4 py-2 rounded-lg transition-colors flex items-center justify-center gap-2 text-sm font-medium"
-                style={{ background: 'var(--color-surface-light)' }}
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  copy(ipv6);
+                  toast.success('IPv6 copied to clipboard');
+                }}
+                className="mt-2 w-full"
+                aria-label={`Copy IPv6 address ${ipv6 || ''}`}
               >
-                <Copy className="w-4 h-4" />
-                Copy
-              </button>
+                <Copy className="w-3.5 h-3.5 mr-2" />
+                Copy IPv6
+              </Button>
             )}
           </div>
         )}

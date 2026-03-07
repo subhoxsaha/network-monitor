@@ -1,209 +1,120 @@
-import axios from 'axios';
+/**
+ * Centralized API utility for Network Monitor Pro.
+ * Handles retries with exponential backoff, timeouts, and standardized error parsing.
+ */
 
-const API_TIMEOUT = 5000;
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+const MAX_RETRIES = 3;
+const INITIAL_BACKOFF = 1000; // 1 second
 
-// Create axios instance with defaults
-const apiClient = axios.create({
-  timeout: API_TIMEOUT,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
+export const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Response cache
-const responseCache = new Map();
+/**
+ * Enhanced fetch with retry logic and timeout
+ */
+export const resilientFetch = async (url, options = {}, retries = MAX_RETRIES) => {
+  const { timeout = 10000, ...fetchOptions } = options;
+  
+  let lastError;
+  
+  for (let i = 0; i < retries; i++) {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    
+    try {
+      const response = await fetch(url, {
+        ...fetchOptions,
+        signal: controller.signal
+      });
+      
+      clearTimeout(id);
+      
+      // If success, return response (wrap in a helper if needed)
+      if (response.ok) {
+        return response;
+      }
+      
+      // Handle non-transient status codes
+      if (response.status === 401 || response.status === 403 || response.status === 404) {
+        throw new Error(`API Request failed with status ${response.status}`);
+      }
 
-// Cache middleware
-const getCachedResponse = (key) => {
-  const cached = responseCache.get(key);
-  if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
-    return cached.data;
+      // Special case: If 500 but message suggests a race condition, retry it
+      const responseData = await response.clone().json().catch(() => ({}));
+      const isRaceCondition = responseData.error?.includes('duplicate key') || 
+                              responseData.error?.includes('VersionError') ||
+                              responseData.message?.includes('duplicate key');
+
+      if (isRaceCondition && i < retries - 1) {
+        console.warn(`[API] Transient conflict detected (500). Retrying...`);
+        const backoff = INITIAL_BACKOFF * Math.pow(2, i);
+        await sleep(backoff);
+        continue;
+      }
+      
+      throw new Error(responseData.error || `Server returned ${response.status}`);
+      
+    } catch (err) {
+      clearTimeout(id);
+      lastError = err;
+      
+      // Only retry on network errors or transient server errors
+      const isNetworkError = err.name === 'TypeError' || err.name === 'AbortError';
+      const isTransientError = !isNetworkError && i < retries - 1;
+      
+      if (isNetworkError || isTransientError) {
+        const backoff = INITIAL_BACKOFF * Math.pow(2, i);
+        console.warn(`[API] Attempt ${i + 1} failed: ${err.message}. Retrying in ${backoff}ms...`);
+        await sleep(backoff);
+        continue;
+      }
+      
+      throw err;
+    }
   }
-  responseCache.delete(key);
-  return null;
+  
+  throw lastError;
 };
 
-const setCachedResponse = (key, data) => {
-  responseCache.set(key, {
-    data,
-    timestamp: Date.now(),
-  });
-};
+/**
+ * Standardized API call helper
+ */
+export const apiCall = async (method, userId, pathOrBody = '/api/trails', body = null) => {
+  let path = pathOrBody;
+  let finalBody = body;
 
-// Geolocation API
-export const geolocationAPI = {
-  getPublicIP: async () => {
-    const cacheKey = 'publicIP';
-    const cached = getCachedResponse(cacheKey);
-    if (cached) return cached;
+  // Handle 3-argument call where the 3rd arg is the body
+  if (typeof pathOrBody === 'object' && pathOrBody !== null) {
+    path = '/api/trails';
+    finalBody = pathOrBody;
+  }
 
-    try {
-      const response = await apiClient.get('https://ipapi.co/json/', {
-        timeout: 8000,
-      });
-      const data = {
-        ip: response.data.ip,
-        country: response.data.country_name,
-        region: response.data.region,
-        city: response.data.city,
-        postal: response.data.postal,
-        timezone: response.data.timezone,
-        isp: response.data.org,
-        asn: response.data.asn,
-        latitude: response.data.latitude,
-        longitude: response.data.longitude,
-        currency: response.data.currency,
-      };
-      setCachedResponse(cacheKey, data);
-      return data;
-    } catch (error) {
-      console.error('Error fetching public IP:', error.message);
-      throw error;
-    }
-  },
-};
-
-// Latency API
-export const latencyAPI = {
-  probeLatency: async (url) => {
-    const startTime = performance.now();
-    try {
-      await fetch(`${url}?t=${Date.now()}`, {
-        mode: 'no-cors',
-        cache: 'no-store',
-      });
-      const endTime = performance.now();
-      return Math.round(endTime - startTime);
-    } catch (error) {
-      return null;
-    }
-  },
-
-  probeMultiple: async (urls) => {
-    const results = await Promise.all(
-      urls.map(async (url) => {
-        const latency = await latencyAPI.probeLatency(url);
-        return { url, latency };
-      })
-    );
-    return results.filter((r) => r.latency !== null);
-  },
-};
-
-// HTTP Tester API
-export const httpTesterAPI = {
-  sendRequest: async (config) => {
-    const {
+  try {
+    const opts = {
       method,
-      url,
-      headers = {},
-      params = {},
-      data,
-    } = config;
-
-    try {
-      const startTime = performance.now();
-      const response = await apiClient({
-        method,
-        url,
-        headers,
-        params,
-        data,
-      });
-      const endTime = performance.now();
-
-      return {
-        status: response.status,
-        statusText: response.statusText,
-        time: Math.round(endTime - startTime),
-        size: JSON.stringify(response.data).length,
-        headers: response.headers,
-        data: response.data,
-      };
-    } catch (error) {
-      if (error.response) {
-        // Server responded with error status
-        return {
-          status: error.response.status,
-          statusText: error.response.statusText,
-          time: 0,
-          size: 0,
-          headers: error.response.headers,
-          data: error.response.data,
-          error: error.message,
-        };
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': userId
       }
-      throw error;
-    }
-  },
-};
-
-// Utility functions
-export const apiUtils = {
-  /**
-   * Retry failed requests
-   */
-  retryRequest: async (fn, maxRetries = 3, delay = 1000) => {
-    for (let i = 0; i < maxRetries; i++) {
-      try {
-        return await fn();
-      } catch (error) {
-        if (i === maxRetries - 1) throw error;
-        await new Promise((resolve) => setTimeout(resolve, delay * (i + 1)));
-      }
-    }
-  },
-
-  /**
-   * Parse error response
-   */
-  parseError: (error) => {
-    if (error.response) {
-      return {
-        status: error.response.status,
-        message: error.response.data?.message || error.message,
-        data: error.response.data,
-      };
-    }
-    if (error.request) {
-      return {
-        status: 0,
-        message: 'Network error - no response from server',
-        data: null,
-      };
-    }
-    return {
-      status: 0,
-      message: error.message,
-      data: null,
     };
-  },
-
-  /**
-   * Build query string from params object
-   */
-  buildQueryString: (params) => {
-    return new URLSearchParams(params).toString();
-  },
-
-  /**
-   * Format response size
-   */
-  formatResponseSize: (bytes) => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
-  },
+    
+    if (finalBody) {
+      opts.body = JSON.stringify(finalBody);
+    }
+    
+    const response = await resilientFetch(path, opts);
+    
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      return { success: true, raw: true };
+    }
+    
+    return await response.json();
+  } catch (err) {
+    console.error(`[API Error] ${method} ${path}:`, err.message);
+    return { 
+      error: true, 
+      message: err.message,
+      isNetworkError: err.name === 'TypeError' || err.name === 'AbortError'
+    };
+  }
 };
-
-// Cache management
-export const cacheManager = {
-  clear: () => responseCache.clear(),
-  clearKey: (key) => responseCache.delete(key),
-  getSize: () => responseCache.size,
-};
-
-export default apiClient;

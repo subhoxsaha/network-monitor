@@ -1,27 +1,104 @@
-/* ─── Base reset ─── */
+/* Base reset */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 html {
-  /* Default root size scales all Tailwind REM units globally */
-  font-size: 15px; /* Compact on desktop to fit dense data */
+  /* Desktop: slightly compact so data-dense UIs breathe */
+  font-size: 15px;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* On mobile, slightly increase base size for legibility but prevent bloat */
-@media (max-width: 480px) {
-  html { font-size: 16px; }
+/* Tablet: give a bit more room */
+@media (max-width: 1024px) {
+  html { font-size: 15px; }
+}
+
+/* Mobile: match OS default — easier to read small values */
+@media (max-width: 640px) {
+  html { font-size: 14.5px; }
+}
+
+:root {
+  --color-canvas: #09090b;
+  --color-surface: #18181b;
+  --color-surface-light: #27272a;
+  --color-ink: #f4f4f5;
+  --color-ink-secondary: #a1a1aa;
+  --color-ink-tertiary: #71717a;
+  --color-ink-quaternary: #3f3f46;
+  --color-blue: #0ea5e9;
+  --color-green: #22c55e;
+  --color-amber: #f59e0b;
+  --color-red: #ef4444;
+  --card-border: rgba(255, 255, 255, 0.08);
 }
 
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-weight: 400;
-  background: var(--color-canvas, #ffffff);
-  color: var(--color-ink, #0a0a0a);
-  line-height: 1.5;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  line-height: 1.55;
   min-height: 100vh;
+  letter-spacing: -0.012em;
+  transition: background-color 0.4s ease, color 0.4s ease;
+  overflow-x: hidden;
+}
+
+/* ─── Semantic type utilities ───
+   Use these for consistent text sizing across all components.
+   They apply responsive sizes automatically. */
+
+/* Page section headings (e.g. "Geolocation & ISP") */
+.section-title {
+  font-size: 0.8125rem;   /* 13px / 12px mobile */
+  font-weight: 600;
+  color: var(--color-ink);
   letter-spacing: -0.01em;
-  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Inside-card headings */
+.card-title {
+  font-size: 0.875rem;   /* 13px */
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+/* Row labels */
+.label-text {
+  font-size: 0.75rem;    /* 11px */
+  color: var(--color-ink-tertiary);
+}
+
+/* Metadata / badges / sub-text */
+.meta-text {
+  font-size: 0.6875rem;  /* 10px */
+  color: var(--color-ink-quaternary);
+  letter-spacing: 0.01em;
+}
+
+/* Monospaced data values */
+.value-text {
+  font-size: 0.8125rem;  /* 12px */
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+
+/* Buttons — consistent comfortable target */
+.btn-text {
+  font-size: 0.75rem;    /* 11px */
+  font-weight: 600;
+  letter-spacing: 0.005em;
+}
+
+@media (max-width: 640px) {
+  .section-title { font-size: 0.8125rem; }
+  .card-title    { font-size: 0.9375rem; } /* slightly larger for mobile readability */
+  .label-text    { font-size: 0.8125rem; }
+  .meta-text     { font-size: 0.75rem; }
+  .value-text    { font-size: 0.875rem; }
+  .btn-text      { font-size: 0.8125rem; }
 }
 
 /* ─── Scrollbar ─── */
@@ -29,6 +106,23 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--color-ink-quaternary, rgba(0,0,0,0.1)); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--color-ink-tertiary, rgba(0,0,0,0.2)); }
+
+.premium-scrollbar::-webkit-scrollbar {
+  width: 5px;
+}
+.premium-scrollbar::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 10px;
+}
+.premium-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background-clip: content-box;
+}
+.premium-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
 
 /* ─── JSON Syntax Highlighting ─── */
 .json-key { color: var(--color-ink); }
@@ -163,4 +257,82 @@ body {
 @keyframes liquid-flow {
   0% { transform: translateX(0); }
   100% { transform: translateX(-50%); }
+}
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(20px); filter: blur(10px); }
+  to { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-rise-in {
+  animation: rise-in 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-fade-in {
+  animation: fade-in 1.2s ease-out both;
+}
+
+.text-glow {
+  text-shadow: 0 0 15px rgba(14, 165, 233, 0.4);
+}
+
+.glass {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Staggered entry transitions */
+.stagger-1 { animation-delay: 0.1s; }
+.stagger-2 { animation-delay: 0.2s; }
+.stagger-3 { animation-delay: 0.3s; }
+.stagger-4 { animation-delay: 0.4s; }
+.stagger-5 { animation-delay: 0.5s; }
+/* ─── Professional Toast Customization ─── */
+.glass-toast {
+  background: rgba(18, 18, 20, 0.85) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: #fff !important;
+  border-radius: 16px !important;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4) !important;
+  padding: 12px 20px !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  letter-spacing: -0.01em !important;
+}
+
+.glass-toast-success {
+  border-left: 3px solid var(--color-green) !important;
+}
+
+.glass-toast-error {
+  border-left: 3px solid var(--color-red) !important;
+}
+
+/* ─── Map Glow Effects ─── */
+.map-glow-trail {
+  filter: drop-shadow(0 0 4px #0a84ff) !important;
+}
+
+.dev-map-active .leaflet-container {
+  cursor: crosshair !important;
+}
+
+.dev-map-active .leaflet-interactive {
+  cursor: pointer !important;
+}
+
+@keyframes shine {
+  0% { transform: translateX(-100%); }
+  50%, 100% { transform: translateX(100%); }
+}
+
+.animate-shine {
+  animation: shine 3s infinite linear;
 }
