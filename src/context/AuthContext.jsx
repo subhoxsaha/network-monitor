@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import logger from '../lib/logger';
 
 const AuthContext = createContext(null);
 
@@ -35,12 +36,18 @@ export const AuthProvider = ({ children }) => {
 
   const login = useCallback((userData) => {
     setUser(userData);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(userData));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(userData));
+    } catch (e) {
+      console.error('Failed to save user session to storage', e);
+    }
   }, []);
 
   const logout = useCallback((navigateFn) => {
     setUser(null);
-    localStorage.removeItem(STORAGE_KEY);
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch(e){}
     if (navigateFn) navigateFn('/', { replace: true });
   }, []);
 

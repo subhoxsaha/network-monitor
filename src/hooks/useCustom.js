@@ -1,4 +1,5 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import logger from '../lib/logger';
 import { notify } from '../lib/toast';
 
 /**
@@ -50,7 +51,7 @@ export const useCopy = (timeout = 2000) => {
         setTimeout(() => setIsCopied(false), timeout);
       } catch (err) {
         notify.error('Failed to copy');
-        console.error('Copy failed:', err);
+        logger.error('Copy failed:', err);
       }
     },
     [timeout]
@@ -68,7 +69,7 @@ export const useLocalStorage = (key, initialValue) => {
       const item = window.localStorage.getItem(key);
       return item ? JSON.parse(item) : initialValue;
     } catch (error) {
-      console.error('Error reading from localStorage:', error);
+      logger.error('Error reading from localStorage:', error);
       return initialValue;
     }
   });
@@ -80,7 +81,7 @@ export const useLocalStorage = (key, initialValue) => {
         setStoredValue(valueToStore);
         window.localStorage.setItem(key, JSON.stringify(valueToStore));
       } catch (error) {
-        console.error('Error writing to localStorage:', error);
+        logger.error('Error writing to localStorage:', error);
       }
     },
     [key, storedValue]

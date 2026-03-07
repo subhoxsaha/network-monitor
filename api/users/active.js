@@ -1,8 +1,9 @@
 import connectDB from '../lib/mongodb.js';
 import Trail from '../lib/Trail.js';
+import { generateRandomName } from '../lib/names.js';
 
 const headers = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': process.env.CORS_ORIGIN || '*',
   'Access-Control-Allow-Methods': 'GET, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-user-id',
   'Content-Type': 'application/json',
@@ -37,17 +38,18 @@ export default async function handler(req, res) {
         'points.0': { $exists: true } // Must have at least one point
       }).select('userId userName userPicture points updatedAt').lean();
 
-      // We only want to send the *last known location* of each user, not their full trail
       const activeUsers = activeTrails.map(trail => {
-        const lastPoint = trail.points[trail.points.length - 1];
+        const points = trail.points || [];
+        const lastLocation = trail.lastLocation || (points.length > 0 ? points[points.length - 1] : { lat: 0, lng: 0, timestamp: Date.now() });
+        
         return {
           userId: trail.userId,
-          name: trail.userName || 'Anonymous User',
+          name: (trail.userName && trail.userName !== 'Anonymous User') ? trail.userName : generateRandomName(trail.userId),
           picture: trail.userPicture || null,
           lastLocation: {
-            lat: lastPoint.lat,
-            lng: lastPoint.lng,
-            timestamp: lastPoint.timestamp
+            lat: lastLocation.lat,
+            lng: lastLocation.lng,
+            timestamp: lastLocation.timestamp
           },
           lastActive: trail.updatedAt
         };
@@ -58,7 +60,7 @@ export default async function handler(req, res) {
 
     return res.status(405).json({ error: `Method ${req.method} not allowed` });
   } catch (err) {
-    console.error('[API Error] users/active.js:', err.message);
-    return res.status(500).json({ error: 'Failed to fetch active users' });
+    console.error('[API Error] users/active.js:', err);
+    return res.status(500).json({ error: 'Failed to fetch active users', details: err.message });
   }
 }

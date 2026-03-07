@@ -5,7 +5,7 @@
  * - Preserves errors for debugging while protecting sensitive data
  */
 
-const isDev = process.env.NODE_ENV === 'development';
+const isDev = import.meta.env.DEV;
 const isBrowser = typeof window !== 'undefined';
 
 // Stub error service (replace with Sentry for production)

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import logger from '../lib/logger';
 import { useAuth } from '../context/AuthContext';
 import { useBrowserGeolocation } from '../hooks/useNetwork';
 import { apiCall } from '../lib/api';
@@ -37,7 +38,7 @@ const LivePresence = () => {
       userPicture: user.picture
     }).catch(err => {
         // Fail silently in background to avoid disrupting UX
-        console.warn('Silently suppressed background presence sync failure:', err);
+        logger.warn('Silently suppressed background presence sync failure:', err);
     });
 
   }, [position, user]);

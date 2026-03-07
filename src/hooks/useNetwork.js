@@ -1,5 +1,6 @@
 // Network API hooks
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
+import logger from '../lib/logger';
 
 // Browser Geolocation API — requests user permission for precise GPS
 export const useBrowserGeolocation = () => {
@@ -14,6 +15,75 @@ export const useBrowserGeolocation = () => {
   const lastGeocodedRef = useRef({ lat: 0, lng: 0 });
   const lastOrientationUpdateRef = useRef(0);
   const watchIdRef = useRef(null);
+
+  const requestLocation = useCallback(() => {
+    if (!('geolocation' in navigator)) {
+      setError('Geolocation API not supported');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+
+    const handleSuccess = (pos) => {
+      const newPos = {
+        latitude: pos.coords.latitude,
+        longitude: pos.coords.longitude,
+        // Mobile phones supply very high accuracy GPS reading (e.g. 4 meters) when enableHighAccuracy is true
+        accuracy: pos.coords.accuracy ? Math.round(pos.coords.accuracy) : null,
+        altitude: pos.coords.altitude,
+        altitudeAccuracy: pos.coords.altitudeAccuracy ? Math.round(pos.coords.altitudeAccuracy) : null,
+        heading: pos.coords.heading, // Natural GPS heading (only when moving)
+        speed: pos.coords.speed,
+        timestamp: new Date(pos.timestamp).toLocaleTimeString(),
+      };
+      setPosition(newPos);
+      setPermissionStatus('granted');
+      setLoading(false);
+
+      // Reverse Geocode - Only if user has moved significantly (> 10m approx)
+      const latDiff = Math.abs(newPos.latitude - lastGeocodedRef.current.lat);
+      const lngDiff = Math.abs(newPos.longitude - lastGeocodedRef.current.lng);
+      if (latDiff > 0.0001 || lngDiff > 0.0001) {
+        lastGeocodedRef.current = { lat: newPos.latitude, lng: newPos.longitude };
+        fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${newPos.latitude}&lon=${newPos.longitude}&zoom=18&addressdetails=1`)
+          .then(res => res.json())
+          .then(data => {
+            if (data && data.address) {
+              setAddress(data.address);
+            }
+          })
+          .catch(() => { /* Silent failure for reverse geocode */ });
+      }
+    };
+
+    const handleError = (err) => {
+      setError(err.message);
+      setLoading(false);
+      if (err.code === 1) setPermissionStatus('denied');
+    };
+
+    // First get a quick position
+    navigator.geolocation.getCurrentPosition(handleSuccess, handleError, {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 0
+    });
+
+    // Then watch for continuous high-accuracy updates
+    if (watchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+    }
+    
+    watchIdRef.current = navigator.geolocation.watchPosition(
+      handleSuccess, 
+      () => {}, // Silent error on watch to avoid spamming UI, primary error handled above
+      {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0
+      }
+    );
+  }, []);
 
   useEffect(() => {
     // Check permission status on mount
@@ -50,7 +120,7 @@ export const useBrowserGeolocation = () => {
           }
         } catch (err) {
           // eslint-disable-next-line no-console
-          console.error('DeviceOrientation permission error:', err);
+          logger.error('DeviceOrientation permission error:', err);
         }
       } else {
         // Non-iOS or older iOS
@@ -71,99 +141,6 @@ export const useBrowserGeolocation = () => {
     };
   }, []);
 
-  const requestLocation = useCallback(() => {
-    if (!('geolocation' in navigator)) {
-      setError('Geolocation API not supported');
-      return;
-    }
-    setLoading(true);
-    setError(null);
-
-    const handleSuccess = (pos) => {
-      const newPos = {
-        latitude: pos.coords.latitude,
-        longitude: pos.coords.longitude,
-        // Mobile phones supply very high accuracy GPS reading (e.g. 4 meters) when enableHighAccuracy is true
-        accuracy: pos.coords.accuracy ? Math.round(pos.coords.accuracy) : null,
-        altitude: pos.coords.altitude,
-        altitudeAccuracy: pos.coords.altitudeAccuracy ? Math.round(pos.coords.altitudeAccuracy) : null,
-        heading: pos.coords.heading, // Natural GPS heading (only when moving)
-        speed: pos.coords.speed,
-        timestamp: new Date(pos.timestamp).toLocaleTimeString(),
-      };
-      setPosition(newPos);
-      setPermissionStatus('granted');
-      setLoading(false);
-
-      // Reverse Geocode - Only if user has moved significantly (> 10m approx)
-      const latDiff = Math.abs(newPos.latitude - lastGeocodedRef.current.lat);
-      const lngDiff = Math.abs(newPos.longitude - lastGeocodedRef.current.lng);
-      
-      if (latDiff > 0.0001 || lngDiff > 0.0001) { // Roughly 10 meters
-        lastGeocodedRef.current = { lat: newPos.latitude, lng: newPos.longitude };
-        fetch(`https://nominatim.openstreetmap.org/reverse?lat=${newPos.latitude}&lon=${newPos.longitude}&format=json`, {
-          headers: { 'Accept-Language': 'en-US,en;q=0.9' }
-        })
-          .then(res => res.json())
-          .then(data => {
-            if (data.address) {
-              setAddress({
-                street: data.address.road || data.address.pedestrian || '',
-                suburb: data.address.suburb || data.address.neighbourhood || '',
-                city: data.address.city || data.address.town || data.address.village || '',
-                state: data.address.state || '',
-                country: data.address.country || '',
-                postcode: data.address.postcode || '',
-                displayString: data.display_name
-              });
-            }
-          })
-          .catch(() => {});
-      }
-    };
-
-    const handleError = (err) => {
-      let msg = 'Unknown location error';
-      switch (err.code) {
-        case 1: 
-          msg = 'Permission Denied: Please enable location access in your browser settings.';
-          setPermissionStatus('denied');
-          break;
-        case 2:
-          msg = 'Position Unavailable: Satellite or network signal lost.';
-          break;
-        case 3:
-          msg = 'Request Timeout: GPS signal taking too long. Try moving outdoors.';
-          break;
-        default:
-          msg = err.message || 'GPS tracking failed';
-      }
-      setError(msg);
-      setLoading(false);
-    };
-
-    const watch = () => {
-      if (watchIdRef.current !== null) {
-        navigator.geolocation.clearWatch(watchIdRef.current);
-      }
-      watchIdRef.current = navigator.geolocation.watchPosition(
-        handleSuccess,
-        handleError,
-        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-      );
-    };
-
-    // Unconditionally start continuous high-accuracy tracking
-    watch();
-
-    // Sometimes mobile browsers require a discrete get request to fire the prompt
-    navigator.geolocation.getCurrentPosition(
-      (pos) => { handleSuccess(pos); },
-      (err) => { /* Ignore discrete error since watcher is running */ },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    );
-  }, []);
-
   return { position, address, permissionStatus, loading, error, heading, requestLocation };
 };
 
@@ -177,7 +154,7 @@ export const usePublicIP = () => {
   useEffect(() => {
     const normalize = (raw, source) => {
       // eslint-disable-next-line no-console
-      console.log(`[GeoIP] Using ${source}`, raw);
+      logger.info(`[GeoIP] Using ${source}`, raw);
       return raw;
     };
 
@@ -261,14 +238,14 @@ export const usePublicIP = () => {
           break;
         } catch (err) {
           // eslint-disable-next-line no-console
-          console.warn(`[GeoIP] Failed:`, err.message);
+          logger.warn(`[GeoIP] Failed:`, err.message);
           lastErr = err;
         }
       }
 
       if (!data) {
         // eslint-disable-next-line no-console
-        console.error('[GeoIP] All APIs failed. Last error:', lastErr);
+        logger.error('[GeoIP] All APIs failed. Last error:', lastErr);
         setError('Unable to retrieve geolocation — all APIs failed');
         setIp('Unavailable');
         setLoading(false);

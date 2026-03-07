@@ -1,5 +1,12 @@
 import { create } from 'zustand';
 
+const safeSetItem = (key, value) => {
+  try { localStorage.setItem(key, value); } catch (e) {}
+};
+const safeGetItem = (key) => {
+  try { return localStorage.getItem(key); } catch (e) { return null; }
+};
+
 // App store for global state management
 export const useAppStore = create((set) => ({
   // UI State
@@ -87,8 +94,8 @@ export const useNetworkStore = create((set) => ({
 export const useLatencyStore = create((set) => ({
   latencyResults: [],
   probing: false,
-  pingHost: localStorage.getItem('pingHost') || '',
-  pingCount: localStorage.getItem('pingCount') || '4',
+  pingHost: safeGetItem('pingHost') || '',
+  pingCount: safeGetItem('pingCount') || '4',
   pinging: false,
   pingResults: [],
   pingStats: '',
@@ -96,11 +103,11 @@ export const useLatencyStore = create((set) => ({
   setLatencyResults: (results) => set({ latencyResults: results }),
   setProbing: (probing) => set({ probing }),
   setPingHost: (host) => {
-    localStorage.setItem('pingHost', host);
+    safeSetItem('pingHost', host);
     set({ pingHost: host });
   },
   setPingCount: (count) => {
-    localStorage.setItem('pingCount', count);
+    safeSetItem('pingCount', count);
     set({ pingCount: count });
   },
   setPinging: (pinging) => set({ pinging }),
@@ -169,15 +176,15 @@ export const useHTTPStore = create((set) => ({
 
 // Theme store
 export const useThemeStore = create((set) => ({
-  theme: localStorage.getItem('theme') || 'dark',
+  theme: safeGetItem('theme') || 'dark',
   setTheme: (theme) => {
-    localStorage.setItem('theme', theme);
+    safeSetItem('theme', theme);
     set({ theme });
   },
   toggleTheme: () =>
     set((state) => {
       const newTheme = state.theme === 'dark' ? 'light' : 'dark';
-      localStorage.setItem('theme', newTheme);
+      safeSetItem('theme', newTheme);
       return { theme: newTheme };
     }),
 }));

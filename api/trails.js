@@ -2,7 +2,7 @@ import connectDB from './lib/mongodb.js';
 import Trail from './lib/Trail.js';
 
 const headers = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': process.env.CORS_ORIGIN || '*',
   'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-user-id',
   'Content-Type': 'application/json',

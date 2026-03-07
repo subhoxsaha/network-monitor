@@ -1,12 +1,11 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
-import { Activity, Globe, Wrench, BookOpen, MapPinPlus, LogOut } from 'lucide-react';
+import { Globe, BookOpen, MapPinPlus, LogOut } from 'lucide-react';
 import { GoogleOAuthProvider } from '@react-oauth/google';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { NetworkProvider } from './context/NetworkContext';
 import { ThemeProvider } from './context/ThemeContext';
-import TailwindNavbar from './components/TailwindNavbar';
 import TailwindNavbar from './components/TailwindNavbar';
 import PageTitle from './components/PageTitle';
 import ParticlesBackground from './components/ParticlesBackground';
@@ -14,8 +13,6 @@ import ProtectedRoute from './components/ProtectedRoute';
 import LivePresence from './components/LivePresence';
 
 import OverviewPage from './pages/OverviewPage';
-import PerformancePage from './pages/PerformancePage';
-import ToolsPage from './pages/ToolsPage';
 import TrackerPage from './pages/TrackerPage';
 import DocumentationPage from './pages/DocumentationPage';
 import LandingPage from './pages/LandingPage';
@@ -47,9 +44,7 @@ const Layout = ({ children }) => {
   
   const pageTitles = {
     '/overview': 'Overview',
-    '/performance': 'Performance',
     '/tracker': 'Location Tracker',
-    '/tools': 'Tools & Diagnostics',
     '/docs': 'Documentation',
   };
 
@@ -66,9 +61,7 @@ const Layout = ({ children }) => {
           
           <nav className="flex md:flex-col gap-2 overflow-x-auto pb-2 md:pb-0 md:sticky md:top-24 md:space-y-2 mt-4 md:mt-6 hide-scrollbar items-center md:items-stretch">
             <SidebarLink to="/overview" icon={Globe} label="Overview" />
-            <SidebarLink to="/performance" icon={Activity} label="Performance" />
             <SidebarLink to="/tracker" icon={MapPinPlus} label="Tracker" />
-            <SidebarLink to="/tools" icon={Wrench} label="Tools" />
             <div className="hidden md:block pt-4 mt-4 border-t border-white/[0.06] text-xs font-semibold text-ink-quaternary tracking-wider uppercase px-4 mb-2">Reference</div>
             <SidebarLink to="/docs" icon={BookOpen} label="Docs" />
           </nav>
@@ -82,7 +75,7 @@ const Layout = ({ children }) => {
       </div>
       
       <footer className="bg-surface mt-auto py-6 text-center text-ink-quaternary text-sm border-t border-white/[0.06]">
-        <p>Network Monitor (React) · Client-side only · No data stored or transmitted</p>
+        <p>made with love by subho</p>
       </footer>
       <Toaster 
         position="top-right" 
@@ -107,9 +100,7 @@ const AppRoutes = () => {
 
       {/* Protected */}
       <Route path="/overview" element={<ProtectedRoute><Layout><OverviewPage /></Layout></ProtectedRoute>} />
-      <Route path="/performance" element={<ProtectedRoute><Layout><PerformancePage /></Layout></ProtectedRoute>} />
       <Route path="/tracker" element={<ProtectedRoute><Layout><TrackerPage /></Layout></ProtectedRoute>} />
-      <Route path="/tools" element={<ProtectedRoute><Layout><ToolsPage /></Layout></ProtectedRoute>} />
       <Route path="/docs" element={<ProtectedRoute><Layout><DocumentationPage /></Layout></ProtectedRoute>} />
 
       {/* Fallback */}

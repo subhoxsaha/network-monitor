@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import logger from '../lib/logger';
 import { MapPinPlus, RefreshCw, Clock, Route, Layers, RotateCcw, Locate, Map as MapIcon, Mountain, ChevronDown, Edit2, Trash2, Check, X } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, Circle as LeafletCircle, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import html2canvas from 'html2canvas';
 import Card from './Card';
 import Badge from './Badge';
 import { useAuth } from '../context/AuthContext';
@@ -11,6 +13,7 @@ import { useBrowserGeolocation } from '../hooks/useNetwork';
 import { getCookie, setCookie } from '../utils/cookies';
 import toast from 'react-hot-toast';
 import { apiCall } from '../lib/api';
+import { todayKey, getTrailFromStorage, generateWavyPath, pinColor, MapBoundsFitter } from '../utils/mapUtils';
 
 // ── Constants ────────────────────────────────────────────
 const GOOGLE_MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY || '';
@@ -22,86 +25,26 @@ const MAP_TYPES = [
 
 const DEFAULT_CENTER = { lat: 20.5937, lng: 78.9629 }; // India
 
-// Helper to center the map bounds dynamically
-const MapBoundsFitter = ({ trail, livePos, activeIdx }) => {
-  const map = useMapEvents({
-    zoom: () => {
-      const z = map.getZoom();
-      const scale = Math.max(0.4, Math.min(2.5, Math.pow(1.2, z - 14)));
-      map.getContainer().style.setProperty('--map-icon-scale', scale);
-    }
-  });
+const TRAIL_COLORS = [
+  { id: 'neon-blue', label: 'Neon Blue', value: '#0a84ff', glow: 'rgba(10,132,255,0.4)' },
+  { id: 'cyber-green', label: 'Cyber Green', value: '#30d158', glow: 'rgba(48,209,88,0.4)' },
+  { id: 'hot-pink', label: 'Hot Pink', value: '#ff375f', glow: 'rgba(255,55,95,0.4)' },
+  { id: 'amber', label: 'Solar Orange', value: '#ff9f0a', glow: 'rgba(255,159,10,0.4)' },
+];
 
-  useEffect(() => {
-    // Set initial scale
-    const z = map.getZoom();
-    const scale = Math.max(0.4, Math.min(2.5, Math.pow(1.2, z - 14)));
-    map.getContainer().style.setProperty('--map-icon-scale', scale);
-
-    if (trail.length === 0) return;
-    
-    // 1. Single active waypoint (from map click) -> Center tightly on it
-    if (activeIdx !== null && activeIdx >= 0 && activeIdx < trail.length) {
-      map.flyTo([trail[activeIdx].lat, trail[activeIdx].lng], 18, { animate: true, duration: 1.5 });
-      return;
-    }
-    
-    // 2. Continuous Live tracking mode (only 1 point total, and we have livePos) -> Center tightly
-    if (trail.length === 1 && livePos) {
-      map.flyTo([livePos.latitude, livePos.longitude], 18, { animate: true, duration: 1.5 });
-      return;
-    }
-
-    // 3. Single waypoint with no active live tracking
-    if (trail.length === 1) {
-      map.flyTo([trail[0].lat, trail[0].lng], 17, { animate: true, duration: 1.5 });
-      return;
-    } 
-    
-    // 4. Multiple waypoints in trail: fit them all
-    const bounds = L.latLngBounds(trail.map(p => [p.lat, p.lng]));
-    
-    // Add live pos to bounds if available, so user and trail are both on screen
-    if (livePos) {
-      bounds.extend([livePos.latitude, livePos.longitude]);
-    }
-    
-    map.flyToBounds(bounds, { padding: [80, 80], animate: true, duration: 1.5, maxZoom: 17 });
-    
-  // We explicitly omit livePos from the dependency array so that continuous 
-  // tiny geolocation updates don't repeatedly yank the camera away from the user.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trail.length, activeIdx, map]);
-
-  return null;
-};
-
-// ── Developer Interactions ──────────────────────────────
-const MapInteractions = ({ onRightClick }) => {
-  useMapEvents({
-    contextmenu: (e) => {
-      onRightClick(e.latlng);
-    }
-  });
-  return null;
-};
+const TRAIL_TYPES = [
+  { id: 'cyber-wave', label: 'Cyber Wave', complexity: 'smooth' },
+  { id: 'turbulent-flow', label: 'Turbulent Flow', complexity: 'high' },
+  { id: 'solid-vector', label: 'Solid Vector', complexity: 'none' },
+];
 
 // ── Helpers ──────────────────────────────────────────────
-const todayKey = () => {
-  // Use UTC YYYY-MM-DD to match the backend and avoid timezone drift
-  const today = new Date().toISOString().split('T')[0];
-  return `nm_trail_${today}`;
-};
-
-const getTrailFromStorage = () => {
-  try {
-    const raw = localStorage.getItem(todayKey());
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
-};
-
 const saveTrailToStorage = (trail) => {
-  localStorage.setItem(todayKey(), JSON.stringify(trail));
+  try {
+    localStorage.setItem(todayKey(), JSON.stringify(trail));
+  } catch (err) {
+    logger.warn('Failed to persist trail data', err);
+  }
 };
 
 const haversine = (a, b) => {
@@ -122,42 +65,19 @@ const formatTime = (ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit'
 
 const reverseGeocode = async (lat, lng) => {
   try {
-    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`, {
-      headers: { 'User-Agent': 'NetworkMonitor/1.0' }
-    });
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${parseFloat(lat)}&lon=${parseFloat(lng)}&zoom=18&addressdetails=1`);
     const data = await res.json();
-    if (data.display_name) {
-      // Extract a shorter, more readable address (e.g., "Park Street, Kolkata")
-      const parts = data.address;
-      const main = parts.road || parts.pedestrian || parts.suburb || parts.neighbourhood || parts.city_district || '';
-      const city = parts.city || parts.town || parts.village || '';
-      if (main && city) return `${main}, ${city}`;
-      return data.display_name.split(',').slice(0, 2).join(',').trim();
-    }
-    return null;
-  } catch {
-    return null;
+    return data?.address?.city || data?.address?.town || data?.address?.village || data?.address?.suburb || data?.address?.county || '';
+  } catch (err) {
+    logger.warn('Reverse geocode failed:', err);
+    return '';
   }
-};
-
-// ── Waypoint pin colors ─────────────────────────────────
-const pinColor = (i) => {
-  // Use a deterministic hue based on index so it's "random" but stable
-  const hue = (i * 137.5) % 360; // Golden angle for nice distribution
-  return `hsl(${hue}, 85%, 55%)`;
-};
-
-const pinLabel = (i, total) => {
-  if (i === 0) return 'S';
-  if (i === total - 1) return 'E';
-  return `${i + 1}`;
 };
 
 // ── Main Component ──────────────────────────────────────
 const LocationTracker = () => {
   const [trail, setTrail] = useState(() => getTrailFromStorage());
   const [loading, setLoading] = useState(false);
-  const [syncing, setSyncing] = useState(true);
   const [mapType, setMapType] = useState(getCookie('nm_map_theme') || 'roadmap');
   const [mapTypeOpen, setMapTypeOpen] = useState(false);
   const [editingIdx, setEditingIdx] = useState(null);
@@ -167,27 +87,54 @@ const LocationTracker = () => {
   const [cloudSyncing, setCloudSyncing] = useState(false);
   const [devMode, setDevMode] = useState(false);
   const [ghostPoint, setGhostPoint] = useState(null);
+  
+  // Trail Customization Settings
+  const [trailColor, setTrailColor] = useState(getCookie('nm_trail_color') || 'neon-blue');
+  const [trailHue, setTrailHue] = useState(parseInt(getCookie('nm_trail_hue')) || 210);
+  const [trailThickness, setTrailThickness] = useState(parseFloat(getCookie('nm_trail_thickness')) || 4);
+  const [trailType, setTrailType] = useState(getCookie('nm_trail_type') || 'cyber-wave');
+
+  const activeColor = useMemo(() => {
+    if (trailColor === 'custom') {
+      const color = `hsl(${trailHue}, 100%, 50%)`;
+      return { id: 'custom', value: color, glow: `hsla(${trailHue}, 100%, 50%, 0.4)` };
+    }
+    return TRAIL_COLORS.find(c => c.id === trailColor) || TRAIL_COLORS[0];
+  }, [trailColor, trailHue]);
   const mapRef = useRef(null);
   const selectedTheme = MAP_TYPES.find(t => t.id === mapType) || MAP_TYPES[0];
-  const { copy } = useCopy();
   const { user } = useAuth();
   const { position: livePos, requestLocation, permissionStatus, heading: compassHeading } = useBrowserGeolocation(); // Auto-tracks live location
+  const isExposed = getCookie('nm_expose_identity') === 'true';
 
-  // Auto-request location on mount so the blue dot shows up immediately
+  const totalDistance = useMemo(() => {
+    let dist = 0;
+    for (let i = 1; i < trail.length; i++) {
+      dist += haversine(trail[i - 1], trail[i]);
+    }
+    return dist;
+  }, [trail]);
+
+  // Auto-request location and center map on first fix
   useEffect(() => {
     requestLocation();
   }, [requestLocation]);
+
+  // Map Follow Logic: Automatically fly to user position if livePos updates
+  useEffect(() => {
+    if (livePos && mapRef.current) {
+      mapRef.current.setView([livePos.latitude, livePos.longitude], mapRef.current.getZoom());
+    }
+  }, [livePos]);
 
   // Wait for auth context to load
 
   // Load trail on mount
   const refreshData = useCallback(async (silent = false) => {
     if (!user?.sub) {
-      setSyncing(false);
       return;
     }
 
-    if (!silent) setSyncing(true);
     const result = await apiCall('GET', user.sub);
     
     if (result?.trail?.points) {
@@ -209,15 +156,12 @@ const LocationTracker = () => {
         }).finally(() => setCloudSyncing(false));
       }
     }
-    
-    if (!silent) setSyncing(false);
-  }, [user?.sub, trail]);
+  }, [user?.sub, user?.email, user?.name, user?.picture, trail]);
 
   // Load trail on mount
   useEffect(() => {
     refreshData(true);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.sub]);
+  }, [user?.sub, refreshData]);
 
   // Persist to localStorage
   useEffect(() => { saveTrailToStorage(trail); }, [trail]);
@@ -227,37 +171,55 @@ const LocationTracker = () => {
   // Shared logic for adding a waypoint point
   const processPoint = useCallback(async (lat, lng, acc, alt) => {
     setLoading(true);
-    const placeName = await reverseGeocode(lat, lng);
-    const point = {
-      lat,
-      lng,
-      accuracy: Math.round(acc || 0),
-      altitude: alt ? Math.round(alt) : null,
-      timestamp: Date.now(),
-      label: placeName || `Waypoint #${trail.length + 1}`,
-    };
-    setTrail((prev) => [...prev, point]);
-    toast.success(placeName ? `At ${placeName}` : 'Waypoint marked!');
-    setLoading(false);
-    if (user?.sub) {
-      setCloudSyncing(true);
-      const res = await apiCall('POST', user.sub, '/api/trails', { 
-        point, 
-        email: user.email,
-        userName: user.name,
-        userPicture: user.picture
-      });
-      setCloudSyncing(false);
+    try {
+      const prevTrailLength = trail.length;
+      const placeName = await reverseGeocode(lat, lng);
       
-      if (res.error) {
-        toast.error(`Cloud sync failed: ${res.message}. It will be retried on next refresh.`, { id: 'sync-error' });
+      const point = {
+        lat,
+        lng,
+        accuracy: Math.round(acc || 0),
+        altitude: alt ? Math.round(alt) : null,
+        timestamp: Date.now(),
+        label: `#${prevTrailLength + 1}_${placeName ? placeName.toUpperCase().replace(/\s+/g, '_') : 'LOCATION'}`,
+      };
+
+      // 1. Send to DB first
+      if (user?.sub) {
+        setCloudSyncing(true);
+        const res = await apiCall('POST', user.sub, '/api/trails', { 
+          point, 
+          email: user.email,
+          userName: isExposed ? user.name : undefined,
+          userPicture: isExposed ? user.picture : undefined
+        });
+        setCloudSyncing(false);
+        
+        if (res.error) {
+          toast.error(`Cloud sync failed: ${res.message}. Waypoint not added.`, { id: 'sync-error' });
+          setLoading(false);
+          return;
+        }
+
+        // 2. Only if DB succeeds, update local state
+        setTrail((prev) => [...prev, point]);
+        toast.success(placeName ? `At ${placeName}` : 'Waypoint marked!');
+      } else {
+        // Fallback for no auth (shouldn't happen with ProtectedRoute)
+        setTrail((prev) => [...prev, point]);
+        toast.success('Waypoint marked (local only)');
       }
+    } catch (err) {
+      logger.error('Waypoint marking failed:', err);
+      toast.error('Failed to mark waypoint');
+    } finally {
+      setLoading(false);
     }
-  }, [trail.length, user]);
+  }, [trail.length, user?.sub, user?.email, user?.name, user?.picture, isExposed]);
 
   // Mark current location
   const markLocation = useCallback(async () => {
-    if (permissionStatus === 'prompt') requestLocation(); // Also start the continuous blue dot watcher
+    if (permissionStatus === 'prompt') requestLocation(); 
     
     if (!('geolocation' in navigator)) {
       toast.error('Geolocation not available');
@@ -269,7 +231,6 @@ const LocationTracker = () => {
       return;
     }
 
-    // Slow path: getting location for the first time
     setLoading(true);
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
@@ -282,6 +243,58 @@ const LocationTracker = () => {
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
   }, [permissionStatus, requestLocation, livePos, processPoint]);
+
+  // Smart Recenter Logic
+  const handleRecenter = useCallback(() => {
+    requestLocation();
+    
+    if (!mapRef.current) return;
+
+    if (trail.length > 0) {
+      const bounds = L.latLngBounds(trail.map(p => [p.lat, p.lng]));
+      if (livePos) {
+        bounds.extend([livePos.latitude, livePos.longitude]);
+      }
+      mapRef.current.flyToBounds(bounds, { padding: [80, 80], animate: true, duration: 1.5 });
+      toast('Viewing Daily Trail', { id: 'recenter' });
+    } else if (livePos) {
+      mapRef.current.flyTo([livePos.latitude, livePos.longitude], 18, { animate: true, duration: 1.5 });
+      toast('Centered on Live Location', { id: 'recenter' });
+    } else {
+      toast('Acquiring GPS signal...');
+    }
+    
+    setSelectedIdx(null);
+  }, [trail, livePos, requestLocation]);
+
+  const exportMapAsImage = useCallback(async () => {
+    const mapContainer = document.querySelector('.leaflet-container');
+    if (!mapContainer) {
+      toast.error('Map container not found');
+      return;
+    }
+
+    const t = toast.loading('Capturing map viewport...');
+    try {
+      // Ensure all tiles are loaded before capture
+      const canvas = await html2canvas(mapContainer, {
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: null,
+        logging: false,
+        scale: 2, // Higher quality
+      });
+
+      const link = document.createElement('a');
+      link.download = `network-monitor-map-${new Date().getTime()}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+      toast.success('Screenshot saved', { id: t });
+    } catch (err) {
+      logger.error('Export failed:', err);
+      toast.error('Export failed. Map tiles might be CORS protected.', { id: t });
+    }
+  }, []);
 
 
 
@@ -302,7 +315,7 @@ const LocationTracker = () => {
     if (selectedIdx === idx) setSelectedIdx(null);
     if (editingIdx === idx) setEditingIdx(null);
     toast('Waypoint deleted');
-  }, [selectedIdx, editingIdx, user]);
+  }, [selectedIdx, editingIdx, user?.sub, user?.email, user?.name, user?.picture]);
 
   const saveEdit = useCallback((idx) => {
     setTrail((prev) => {
@@ -321,17 +334,8 @@ const LocationTracker = () => {
     });
     setEditingIdx(null);
     toast.success('Label updated');
-  }, [editLabel, user]);
+  }, [editLabel, user?.sub, user?.email, user?.name, user?.picture]);
 
-  // Computed stats
-  const totalDistance = useMemo(() => trail.reduce((sum, p, i) => {
-    if (i === 0) return 0;
-    return sum + haversine(trail[i - 1], p);
-  }, 0), [trail]);
-
-  const timeSpan = useMemo(() => trail.length >= 2
-    ? `${formatTime(trail[0].timestamp)} → ${formatTime(trail[trail.length - 1].timestamp)}`
-    : '—', [trail]);
 
   const mapCenter = trail.length > 0
     ? [trail[trail.length - 1].lat, trail[trail.length - 1].lng]
@@ -339,39 +343,31 @@ const LocationTracker = () => {
       ? [livePos.latitude, livePos.longitude] 
       : [DEFAULT_CENTER.lat, DEFAULT_CENTER.lng];
 
-  const polylinePath = useMemo(() => trail.map((p) => [p.lat, p.lng]), [trail]);
+  const polylinePath = useMemo(() => {
+    const basePoints = trail.map((p) => [p.lat, p.lng]);
+    return generateWavyPath(basePoints, trailType);
+  }, [trail, trailType]);
 
-  // Create custom Blue Dot Icon
-  const customDotMarker = useMemo(() => {
-    const isGPSActive = permissionStatus === 'granted';
-    const heading = compassHeading || 0;
-
-    if (isGPSActive && heading != null) {
-      return L.divIcon({
-        className: 'custom-leaflet-marker',
-        html: `
-          <div style="position: relative; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; transform: scale(var(--map-icon-scale, 1)); transform-origin: center center; transition: transform 0.1s ease-out;">
-            <div style="transform: rotate(${heading}deg); position: absolute; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="#0a84ff" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="filter: drop-shadow(0px 1px 3px rgba(0,0,0,0.5)); transform: translateY(-4px);">
-                <path d="M12 2L2 22l10-4 10 4L12 2z" />
-              </svg>
-            </div>
-          </div>
-        `,
-        iconSize: [32, 32],
-        iconAnchor: [16, 16]
-      });
-    }
-
+  // Factory for multiplayer avatars with stable pulse
+  const getActiveUserIcon = useCallback((u) => {
+    const ringColor = u.pulseColor || '#0a84ff';
+    const glowColor = u.isLocalUser ? ringColor : '#8a2be2';
+    
     return L.divIcon({
       className: 'custom-leaflet-marker',
       html: `
-        <div style="width: 16px; height: 16px; background-color: #0a84ff; border: 2.5px solid white; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.3); transform: scale(var(--map-icon-scale, 1)); transform-origin: center center; transition: transform 0.1s ease-out;"></div>
+        <div style="position: relative; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; transform: translateY(-4px) scale(var(--map-icon-scale, 1)); transform-origin: bottom center; transition: transform 0.1s ease-out;">
+          <div style="position: absolute; width: 100%; height: 100%; background: ${ringColor}; border-radius: 50%; opacity: 0.4;" class="animate-stable-pulse"></div>
+          <div style="position: relative; width: 28px; height: 28px; border-radius: 50%; padding: 2px; background: linear-gradient(135deg, ${ringColor}, ${glowColor}); box-shadow: 0 4px 12px rgba(0,0,0,0.5); z-index: 10; display: flex; align-items: center; justify-content: center;">
+            <img src="${u.picture || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(u.name || 'User') + '&background=random&color=fff&size=128&bold=true'}" style="width: 100%; height: 100%; border-radius: 50%; border: 2px solid white; object-fit: cover;" />
+          </div>
+        </div>
       `,
-      iconSize: [16, 16],
-      iconAnchor: [8, 8]
+      iconSize: [32, 32],
+      iconAnchor: [16, 16],
+      popupAnchor: [0, -16],
     });
-  }, [permissionStatus, compassHeading]);
+  }, []);
 
   // Factory for dynamic waypoint markers
   const getWaypointIcon = useCallback((i) => {
@@ -410,9 +406,71 @@ const LocationTracker = () => {
   // ── Render ────────────────────────────────────────────
 
   return (
-    <div className="space-y-6 animate-rise-in">
-      {/* ── Immersive Floating Map Card ── */}
-      <Card className="p-0 overflow-hidden relative shadow-xl bg-surface" style={{ borderRadius: '24px', height: '36rem' }}>
+    <div className="space-y-4 sm:space-y-6 animate-rise-in">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 p-1">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="flex items-center gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-2xl shadow-sm border" style={{ background: 'var(--color-surface)', borderColor: 'var(--card-border)' }}>
+              <button 
+                onClick={() => {
+                  setDevMode(!devMode);
+                  if (devMode) setGhostPoint(null);
+                  toast(devMode ? 'Dev Mode Disabled' : 'Dev Mode Enabled', { id: 'dev-toggle' });
+                }}
+                className="hover:opacity-80 transition-all duration-300 relative group"
+                aria-label={devMode ? "Disable developer mode" : "Enable developer mode"}
+              >
+                {devMode && (
+                  <span className="absolute inset-0 rounded-full bg-blue-400/20 animate-ping scale-150" />
+                )}
+                <Route className={`w-4 h-4 transition-colors relative z-10 ${devMode ? 'text-blue-400' : 'text-[#ff9f0a]'}`} />
+              </button>
+              <div className="h-4 w-px bg-ink/10 mx-0.5" />
+              <div className="flex flex-col">
+                <h2 className="text-xs font-bold text-ink tracking-tight">Daily Trail</h2>
+                <p className="text-[9px] text-ink-tertiary font-medium uppercase tracking-wider">Activity Log</p>
+              </div>
+            </div>
+
+            {/* Cloud Sync Pulse Indicator */}
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all duration-500 ${cloudSyncing ? 'border-blue-500/30 bg-blue-500/5 translate-y-0 opacity-100' : 'border-transparent opacity-60 translate-y-1'}`}>
+              <div className={`w-1.5 h-1.5 rounded-full ${cloudSyncing ? 'bg-blue-400 animate-pulse' : 'bg-ink-quaternary'}`} />
+              <span className={`text-[10px] font-bold ${cloudSyncing ? 'text-blue-400' : 'text-ink-tertiary'}`}>
+                {cloudSyncing ? 'Syncing...' : 'Synced'}
+              </span>
+            </div>
+          </div>
+
+          {/* Trail Stats Group */}
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <div className="flex items-center gap-3 sm:gap-4 px-3 sm:px-4 py-2 rounded-2xl border transition-all hover:bg-surface-light border-dashed sm:border-solid flex-1 sm:flex-none justify-between sm:justify-start" style={{ background: 'var(--color-surface)', borderColor: 'var(--card-border)' }}>
+              <div className="flex flex-col">
+                <span className="text-[8px] sm:text-[9px] font-bold text-ink-tertiary uppercase tracking-tighter">Points</span>
+                <span className="text-xs sm:text-sm font-black text-ink leading-tight">{trail.length}</span>
+              </div>
+              <div className="w-px h-5 sm:h-6 bg-ink/5" />
+              <div className="flex flex-col">
+                <span className="text-[8px] sm:text-[9px] font-bold text-ink-tertiary uppercase tracking-tighter">Dist.</span>
+                <span className="text-xs sm:text-sm font-black text-ink leading-tight">{formatDistance(totalDistance)}</span>
+              </div>
+              <div className="w-px h-5 sm:h-6 bg-ink/5" />
+              <div className="flex flex-col">
+                <span className="text-[8px] sm:text-[9px] font-bold text-ink-tertiary uppercase tracking-tighter">Live</span>
+                <span className="text-xs sm:text-sm font-black text-ink leading-tight">{trail.length > 0 ? formatTime(trail[trail.length - 1].timestamp).split(' ')[0] : '--:--'}</span>
+              </div>
+            </div>
+            
+            <button 
+              onClick={() => refreshData()}
+              className="p-2 sm:p-2.5 rounded-2xl border hover:bg-surface-light transition-all active:scale-95 shadow-sm group bg-surface"
+              style={{ borderColor: 'var(--card-border)' }}
+            >
+              <RefreshCw className={`w-3 h-3 sm:w-3.5 sm:h-3.5 text-ink-secondary group-hover:rotate-180 transition-transform duration-500 ${cloudSyncing ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
+        </div>
+
+      {/* ── Immersive Map Card ── */}
+      <Card className="p-0 overflow-hidden relative shadow-xl bg-surface h-[32rem] sm:h-[36rem] md:h-[40rem]" style={{ borderRadius: '32px' }}>
         
         {/* Loading Overlay */}
         <div 
@@ -425,7 +483,7 @@ const LocationTracker = () => {
 
         {/* Full-bleed Map */}
         <div 
-          className={`absolute inset-0 z-0 transition-all duration-1000 ease-out ${devMode ? 'dev-map-active scale-[0.99] ring-4 ring-blue-500/20 rounded-2xl' : ''}`}
+          className={`absolute inset-0 z-0 transition-all duration-1000 ease-out ${devMode ? 'dev-map-active scale-[0.99] ring-4 ring-blue-500/20 rounded-2xl' : ''} ${mapType === 'roadmap' ? 'map-light-theme' : 'map-dark-theme'}`}
           style={{ 
             opacity: isMapReady ? 1 : 0, 
             filter: isMapReady ? 'blur(0px)' : 'blur(8px)',
@@ -450,29 +508,40 @@ const LocationTracker = () => {
             />
             
             <MapBoundsFitter trail={trail} livePos={livePos} activeIdx={selectedIdx} />
-            {devMode && <MapInteractions onRightClick={(ll) => setGhostPoint(ll)} />}
 
             {polylinePath.length >= 2 && (
               <>
-                {/* Outer Glow Polyline */}
+                {/* Layer 1: Deep Diffuse Glow */}
                 <Polyline 
                   positions={polylinePath} 
                   pathOptions={{ 
-                    color: '#0a84ff', 
-                    opacity: 0.25, 
-                    weight: 8,
+                    color: activeColor.value, 
+                    opacity: 0.1, 
+                    weight: trailThickness * 2.5,
+                    lineJoin: 'round',
+                    lineCap: 'round',
+                    className: 'map-glow-trail-deep'
+                  }} 
+                />
+                {/* Layer 2: Medium Focused Glow */}
+                <Polyline 
+                  positions={polylinePath} 
+                  pathOptions={{ 
+                    color: activeColor.value, 
+                    opacity: 0.22, 
+                    weight: trailThickness * 1.2,
                     lineJoin: 'round',
                     lineCap: 'round',
                     className: 'map-glow-trail'
                   }} 
                 />
-                {/* Core Crisp Polyline */}
+                {/* Layer 3: Sharp Core Line */}
                 <Polyline 
                   positions={polylinePath} 
                   pathOptions={{ 
-                    color: '#0a84ff', 
+                    color: activeColor.value, 
                     opacity: 0.9, 
-                    weight: 3,
+                    weight: Math.max(0.8, trailThickness * 0.3),
                     lineJoin: 'round',
                     lineCap: 'round'
                   }} 
@@ -480,30 +549,6 @@ const LocationTracker = () => {
               </>
             )}
 
-            {/* Ghost Manual Marker (Dev Mode) */}
-            {devMode && ghostPoint && (
-              <Marker
-                position={ghostPoint}
-                icon={ghostIcon}
-                eventHandlers={{
-                   click: () => {
-                     // Confirm manually
-                     const lat = ghostPoint.lat;
-                     const lng = ghostPoint.lng;
-                     setGhostPoint(null);
-                     // Call the markLocation logic but with override coords
-                     processPoint(lat, lng, 0, null);
-                   }
-                }}
-              >
-                <Popup closeButton={false}>
-                  <div className="text-[11px] font-bold text-center p-1">
-                    Left-click marker to CONFIRM<br/>
-                    Right-click elsewhere to RE-POSITION
-                  </div>
-                </Popup>
-              </Marker>
-            )}
             
             {/* Trail Markers (Red Pins) */}
             {trail.map((p, i) => (
@@ -534,22 +579,44 @@ const LocationTracker = () => {
             ))}
             
             {/* Live User Position Marker (Blue Dot with Arrow if moving) */}
-            {livePos && (
+            {livePos && user && (
               <>
                 <Marker
                   position={[livePos.latitude, livePos.longitude]}
-                  icon={customDotMarker}
+                  icon={getActiveUserIcon({
+                    name: user.name,
+                    picture: user.picture,
+                    isLocalUser: true,
+                    pulseColor: activeColor.value
+                  })}
                   zIndexOffset={9999}
-                />
+                >
+                  <Popup className="custom-popup" closeButton={false}>
+                    <div style={{ padding: '4px', fontFamily: 'Inter, sans-serif' }}>
+                      <div style={{ fontWeight: 800, fontSize: '14px', color: '#0a84ff', marginBottom: '4px', display: 'flex', items: 'center', gap: '6px' }}>
+                        <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                        Live Tracker
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#636366', lineHeight: '1.6' }}>
+                        <div className="flex justify-between gap-4"><b>Accuracy:</b> <span className="font-mono">±{Math.round(livePos.accuracy || 0)}m</span></div>
+                        {livePos.altitude && <div className="flex justify-between gap-4"><b>Altitude:</b> <span className="font-mono">{Math.round(livePos.altitude)}m</span></div>}
+                        <div className="flex justify-between gap-4"><b>Heading:</b> <span className="font-mono">{Math.round(compassHeading || 0)}°</span></div>
+                        <div className="mt-1 pt-1 border-t border-zinc-100 text-[10px] text-zinc-400">
+                          Last Signal: {new Date().toLocaleTimeString()}
+                        </div>
+                      </div>
+                    </div>
+                  </Popup>
+                </Marker>
                 {livePos.accuracy && (
                   <LeafletCircle
                     center={[livePos.latitude, livePos.longitude]}
                     radius={livePos.accuracy}
                     pathOptions={{
-                      fillColor: '#0a84ff',
-                      fillOpacity: 0.15,
-                      color: '#0a84ff',
-                      opacity: 0.3,
+                      fillColor: activeColor.value,
+                      fillOpacity: 0.1,
+                      color: activeColor.value,
+                      opacity: 0.25,
                       weight: 1,
                     }}
                     interactive={false}
@@ -560,50 +627,6 @@ const LocationTracker = () => {
           </MapContainer>
         </div>
 
-        {/* ── Floating Top Left (Title & Stats) ── */}
-        <div className="absolute top-4 left-4 z-10 flex flex-col gap-2 pointer-events-none">
-          {/* Header Panel */}
-          <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-2xl shadow-lg pointer-events-auto" style={{ background: 'rgba(28,28,30,0.85)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.1)' }}>
-            <button 
-              onClick={() => {
-                setDevMode(!devMode);
-                if (devMode) setGhostPoint(null);
-                toast(devMode ? 'Dev Mode Disabled' : 'Dev Mode Enabled', { id: 'dev-toggle' });
-              }}
-              className="hover:opacity-80 transition-all duration-300 relative group"
-              aria-label={devMode ? "Disable developer mode" : "Enable developer mode"}
-            >
-              {devMode && (
-                <span className="absolute inset-0 rounded-full bg-blue-400/20 animate-ping scale-150" />
-              )}
-              <Route className={`w-4 h-4 transition-colors relative z-10 ${devMode ? 'text-blue-400' : 'text-[#ff9f0a]'}`} />
-            </button>
-            <h2 className="text-sm font-bold text-white tracking-wide">Daily Trail</h2>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'rgba(255,159,10,0.15)', color: '#ff9f0a' }}>
-              {new Date().toLocaleDateString([], { day: 'numeric', month: 'short' })}
-            </span>
-            {user?.sub && (
-              <span className={`text-[10px] px-2 py-0.5 rounded-full backdrop-blur-md transition-all duration-300 ${cloudSyncing ? 'text-blue-400 bg-blue-500/20 animate-pulse' : 'text-zinc-400 bg-black/40'}`}>
-                {cloudSyncing ? '☁ Syncing...' : '☁ Synced'}
-              </span>
-            )}
-          </div>
-          
-          {/* Stats Panel */}
-          {trail.length > 0 && (
-            <div className="flex items-center gap-4 px-4 py-2.5 rounded-2xl shadow-lg pointer-events-auto" style={{ background: 'rgba(28,28,30,0.85)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.1)' }}>
-              <div>
-                <p className="text-zinc-400 uppercase text-[9px] font-bold tracking-wider mb-0.5">Waypoints</p>
-                <p className="text-white font-mono font-bold text-xs">{trail.length}</p>
-              </div>
-              <div className="w-px h-6 bg-white/10" />
-              <div>
-                <p className="text-zinc-400 uppercase text-[9px] font-bold tracking-wider mb-0.5">Distance</p>
-                <p className="text-white font-mono font-bold text-xs">{formatDistance(totalDistance)}</p>
-              </div>
-            </div>
-          )}
-        </div>
 
         {/* ── Floating Top Right (Controls & Actions) ── */}
         <div className="absolute top-4 right-4 z-50 flex flex-col items-end gap-2">
@@ -611,61 +634,157 @@ const LocationTracker = () => {
           <div className="relative group">
             <button
               onClick={() => setMapTypeOpen(!mapTypeOpen)}
-              onBlur={() => setTimeout(() => setMapTypeOpen(false), 200)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold shadow-lg transition-transform hover:scale-105 active:scale-95"
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-[9px] sm:text-[10px] font-bold shadow-lg transition-transform hover:scale-105 active:scale-95"
               style={{ background: 'rgba(28,28,30,0.85)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff' }}
               aria-label="Toggle map theme selector"
               aria-expanded={mapTypeOpen}
             >
-              <selectedTheme.icon className="w-3.5 h-3.5 text-zinc-300" />
-              <span>Map Type</span>
-              <ChevronDown className="w-3 h-3 transition-transform" style={{ transform: mapTypeOpen ? 'rotate(180deg)' : 'rotate(0deg)' }} />
+              <selectedTheme.icon className="w-3 sm:w-3.5 h-3 sm:h-3.5 text-zinc-300" />
+              <span>Settings</span>
+              <ChevronDown className="w-2.5 sm:w-3 h-2.5 sm:h-3 transition-transform" style={{ transform: mapTypeOpen ? 'rotate(180deg)' : 'rotate(0deg)' }} />
             </button>
 
             {mapTypeOpen && (
               <div
-                className="absolute top-full right-0 mt-2 p-1.5 rounded-2xl shadow-xl flex flex-col gap-1 min-w-[130px] animate-rise-in origin-top-right z-50"
+                className="absolute top-full right-0 mt-2 p-3 rounded-2xl shadow-xl flex flex-col gap-3 min-w-[200px] sm:min-w-[240px] animate-rise-in origin-top-right z-50"
                 style={{ background: 'rgba(28,28,30,0.95)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.1)' }}
               >
-                {MAP_TYPES.map(({ id, label, icon: Icon }) => (
-                  <button
-                    key={id}
-                    onClick={() => { 
-                      setMapTypeOpen(false);
-                      if (mapType !== id) {
-                        setIsMapReady(false);
-                        setMapType(id);
-                        setCookie('nm_map_theme', id, 30); // Set cookie here
-                        // Simulate loading delay for new tiles
-                        setTimeout(() => setIsMapReady(true), 600);
-                      }
-                    }}
-                    className="flex items-center justify-between px-3 py-2 rounded-xl text-[11px] font-semibold w-full transition-colors hover:bg-white/10"
-                    style={{ color: mapType === id ? '#fff' : 'rgba(255,255,255,0.6)', background: mapType === id ? 'rgba(255,255,255,0.08)' : 'transparent' }}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <Icon className="w-3.5 h-3.5" style={{ color: mapType === id ? '#0a84ff' : 'inherit' }} />
+                {/* Map Type Section */}
+                <div className="flex flex-col gap-1">
+                  <p className="text-[9px] uppercase font-bold text-zinc-500 px-3 py-1">Map Theme</p>
+                  {MAP_TYPES.map(({ id, label, icon: Icon }) => (
+                    <button
+                      key={id}
+                      onClick={() => { 
+                        if (mapType !== id) {
+                          setIsMapReady(false);
+                          setMapType(id);
+                          setCookie('nm_map_theme', id, 30);
+                          setTimeout(() => setIsMapReady(true), 600);
+                        }
+                      }}
+                      className="flex items-center justify-between px-3 py-2 rounded-xl text-[11px] font-semibold w-full transition-colors hover:bg-white/10"
+                      style={{ color: mapType === id ? '#fff' : 'rgba(255,255,255,0.6)', background: mapType === id ? 'rgba(255,255,255,0.08)' : 'transparent' }}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Icon className="w-3.5 h-3.5" style={{ color: mapType === id ? activeColor.value : 'inherit' }} />
+                        {label}
+                      </div>
+                      {mapType === id && <div className="w-1.5 h-1.5 rounded-full" style={{ background: activeColor.value }} />}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="h-px bg-white/10 mx-1" />
+
+                {/* Trail Style Section */}
+                <div className="flex flex-col gap-1">
+                  <p className="text-[9px] uppercase font-bold text-zinc-500 px-3 py-1">Trail Style</p>
+                  {TRAIL_TYPES.map(({ id, label }) => (
+                    <button
+                      key={id}
+                      onClick={() => {
+                        setTrailType(id);
+                        setCookie('nm_trail_type', id, 30);
+                      }}
+                      className="flex items-center justify-between px-3 py-2 rounded-xl text-[11px] font-semibold w-full transition-colors hover:bg-white/10"
+                      style={{ color: trailType === id ? '#fff' : 'rgba(255,255,255,0.6)', background: trailType === id ? 'rgba(255,255,255,0.08)' : 'transparent' }}
+                    >
                       {label}
+                      {trailType === id && <div className="w-1.5 h-1.5 rounded-full" style={{ background: activeColor.value }} />}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="h-px bg-white/10 mx-1" />
+
+                {/* Trail Color Section */}
+                <div className="flex flex-col gap-2">
+                  <div className="flex flex-col gap-1.5 px-3 py-1">
+                    <p className="text-[9px] uppercase font-bold text-zinc-500">Trail Appearance</p>
+                    
+                    {/* Hue Slider */}
+                    <div className="flex flex-col gap-1">
+                      <div className="flex justify-between text-[8px] font-bold text-zinc-400">
+                        <span>Spectrum</span>
+                        <span>{trailHue}°</span>
+                      </div>
+                      <input 
+                        type="range"
+                        min="0"
+                        max="360"
+                        value={trailHue}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value);
+                          setTrailHue(val);
+                          setTrailColor('custom');
+                          setCookie('nm_trail_hue', val, 30);
+                          setCookie('nm_trail_color', 'custom', 30);
+                        }}
+                        className="w-full h-1.5 rounded-lg appearance-none cursor-pointer"
+                        style={{ 
+                          background: 'linear-gradient(to right, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000)' 
+                        }}
+                      />
                     </div>
-                    {mapType === id && <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />}
+
+                    {/* Thickness Slider */}
+                    <div className="flex flex-col gap-1">
+                      <div className="flex justify-between text-[8px] font-bold text-zinc-400">
+                        <span>Line Weight</span>
+                        <span>{trailThickness}px</span>
+                      </div>
+                      <input 
+                        type="range"
+                        min="1"
+                        max="10"
+                        step="0.5"
+                        value={trailThickness}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          setTrailThickness(val);
+                          setCookie('nm_trail_thickness', val, 30);
+                        }}
+                        className="w-full h-1.5 rounded-lg appearance-none cursor-pointer bg-zinc-700"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-2 px-2 py-1">
+                    {TRAIL_COLORS.map(({ id, value, label }) => (
+                      <button
+                        key={id}
+                        onClick={() => {
+                          setTrailColor(id);
+                          setCookie('nm_trail_color', id, 30);
+                        }}
+                        className={`w-8 h-8 rounded-full border-2 transition-all hover:scale-110 ${trailColor === id ? 'border-white scale-110 shadow-lg' : 'border-transparent'}`}
+                        style={{ background: value }}
+                        title={label}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                <div className="h-px bg-white/10 mx-1" />
+
+                {/* Actions Section */}
+                <div className="px-2 pt-1 pb-2">
+                  <button
+                    onClick={exportMapAsImage}
+                    className="flex items-center justify-center gap-2 w-full py-2 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-[10px] font-bold border border-blue-500/30 transition-colors"
+                  >
+                    <MapIcon className="w-3 h-3" />
+                    Snap Viewport
                   </button>
-                ))}
+                </div>
               </div>
             )}
           </div>
 
           {/* Action Buttons */}
           <div className="flex gap-2">
-            <button
-              onClick={() => refreshData(false)}
-              disabled={syncing}
-              title="Refresh Trail"
-              className={`w-9 h-9 flex items-center justify-center rounded-full shadow-lg transition-transform hover:scale-105 active:scale-95 disabled:opacity-30 disabled:scale-100 ${syncing ? 'animate-spin' : ''}`}
-              style={{ background: 'rgba(28,28,30,0.85)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.1)' }}
-              aria-label="Refresh trail data from cloud"
-            >
-              <RefreshCw className="w-4 h-4 text-zinc-300" />
-            </button>
+            
           </div>
         </div>
 
@@ -692,26 +811,18 @@ const LocationTracker = () => {
           </button>
         </div>
 
-        {/* ── Floating Bottom Right (Re-center) ── */}
+        {/* ── Floating Bottom Right (Locate Me) ── */}
         <button
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            if (!livePos || permissionStatus === 'prompt') {
-              requestLocation();
-              toast('Acquiring GPS signal...');
-            } else if (mapRef.current) {
-              mapRef.current.flyTo([livePos.latitude, livePos.longitude], 18, { animate: true, duration: 1.5 });
-              toast('Centered on Live Location', { id: 'recenter' });
-            }
-            setSelectedIdx(null); // Unselect any waypoint
+            handleRecenter();
           }}
-          title="Re-center on Live Location"
-          className="absolute bottom-6 right-6 z-10 w-12 h-12 flex items-center justify-center rounded-full shadow-2xl transition-transform hover:scale-105 active:scale-95"
-          style={{ background: 'rgba(28,28,30,0.85)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.15)' }}
-          aria-label="Center map on your current location"
+          title="Recenter Map (Fit all waypoints)"
+          className="absolute bottom-6 right-6 z-[1000] w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center rounded-full transition-all hover:scale-110 active:scale-95 bg-blue-600/90 hover:bg-blue-500 backdrop-blur-xl shadow-[0_8px_32px_rgba(10,132,255,0.4)] border border-white/20"
+          aria-label="Recenter map on your current location and waypoints"
         >
-          <Locate className="w-6 h-6 text-blue-500" />
+          <Locate className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
         </button>
       </Card>
 

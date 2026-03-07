@@ -2,6 +2,7 @@
  * Centralized API utility for Network Monitor Pro.
  * Handles retries with exponential backoff, timeouts, and standardized error parsing.
  */
+import logger from './logger';
 
 const MAX_RETRIES = 3;
 const INITIAL_BACKOFF = 1000; // 1 second
@@ -45,7 +46,7 @@ export const resilientFetch = async (url, options = {}, retries = MAX_RETRIES) =
                               responseData.message?.includes('duplicate key');
 
       if (isRaceCondition && i < retries - 1) {
-        console.warn(`[API] Transient conflict detected (500). Retrying...`);
+        logger.warn(`[API] Transient conflict detected (500). Retrying...`);
         const backoff = INITIAL_BACKOFF * Math.pow(2, i);
         await sleep(backoff);
         continue;
@@ -63,7 +64,7 @@ export const resilientFetch = async (url, options = {}, retries = MAX_RETRIES) =
       
       if (isNetworkError || isTransientError) {
         const backoff = INITIAL_BACKOFF * Math.pow(2, i);
-        console.warn(`[API] Attempt ${i + 1} failed: ${err.message}. Retrying in ${backoff}ms...`);
+        logger.warn(`[API] Attempt ${i + 1} failed: ${err.message}. Retrying in ${backoff}ms...`);
         await sleep(backoff);
         continue;
       }
@@ -110,7 +111,7 @@ export const apiCall = async (method, userId, pathOrBody = '/api/trails', body =
     
     return await response.json();
   } catch (err) {
-    console.error(`[API Error] ${method} ${path}:`, err.message);
+    logger.error(`[API Error] ${method} ${path}:`, err.message);
     return { 
       error: true, 
       message: err.message,

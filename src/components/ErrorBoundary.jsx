@@ -1,4 +1,5 @@
 import React from 'react';
+import logger from '../lib/logger';
 import { AlertTriangle, RefreshCcw, Home } from 'lucide-react';
 import Card from './Card';
 import Button from './Button';
@@ -14,7 +15,7 @@ class ErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, errorInfo) {
-    console.error('[Global Error Boundary] Caught error:', error, errorInfo);
+    logger.error('[Global Error Boundary] Caught error:', error, errorInfo);
   }
 
   render() {
@@ -54,7 +55,7 @@ class ErrorBoundary extends React.Component {
               </Button>
             </div>
 
-            {process.env.NODE_ENV === 'development' && (
+            {import.meta.env.DEV && (
               <div className="mt-8 p-4 rounded-lg bg-red-500/5 border border-red-500/10 text-left overflow-auto max-h-40">
                 <p className="text-[10px] font-mono text-red-400 whitespace-pre-wrap">
                   {this.state.error?.toString()}

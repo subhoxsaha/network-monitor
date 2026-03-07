@@ -6,6 +6,7 @@ import { useCopy } from '../hooks/useCustom';
 import Card from './Card';
 import Button from './Button';
 import WaveLoader from './WaveLoader';
+import toast from 'react-hot-toast';
 
 const useNetworkSpeed = () => {
   const [data, setData] = useState({ loading: true, downlink: null, rtt: null, effectiveType: null, type: null, measured: false });
