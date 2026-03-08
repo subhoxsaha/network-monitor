@@ -1,5 +1,4 @@
-import connectDB from './lib/mongodb.js';
-import Trail from './lib/Trail.js';
+import { supabase } from './lib/supabase.js';
 
 const headers = {
   'Access-Control-Allow-Origin': '*',
@@ -19,8 +18,6 @@ export default async function handler(req, res) {
   Object.entries(headers).forEach(([k, v]) => res.setHeader(k, v));
 
   try {
-    await connectDB();
-
     // Extract userId from request (sent by frontend)
     const userId = req.headers['x-user-id'];
     if (!userId || typeof userId !== 'string' || userId.length < 5) {
@@ -32,8 +29,23 @@ export default async function handler(req, res) {
     // ── GET: Retrieve today's trail ──
     if (req.method === 'GET') {
       const date = req.query.date || today;
-      const trail = await Trail.findOne({ userId, date });
-      return res.status(200).json({ trail: trail || { points: [], totalDistance: 0 } });
+      const { data: trail, error } = await supabase
+        .from('trails')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('date', date)
+        .single();
+
+      if (error && error.code !== 'PGRST116') { // PGRST116 is "no rows found"
+        throw error;
+      }
+
+      return res.status(200).json({ 
+        trail: trail ? {
+          points: trail.points,
+          totalDistance: parseFloat(trail.total_distance || 0)
+        } : { points: [], totalDistance: 0 } 
+      });
     }
 
     // ── POST: Add a waypoint to today's trail ──
@@ -43,28 +55,50 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'Invalid point data' });
       }
 
-      // Calculate distance from previous point if available
-      // Fetch current trail first to get the last point for distance calc
-      // (This is still a slight race for distance, but atomic for the points array)
-      const currentTrail = await Trail.findOne({ userId, date: today });
+      // Fetch current trail points to append and calculate distance
+      const { data: currentTrail, error: fetchError } = await supabase
+        .from('trails')
+        .select('points, total_distance')
+        .eq('user_id', userId)
+        .eq('date', today)
+        .single();
+
+      if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
+
+      const prevPoints = currentTrail?.points || [];
+      const prevDistance = parseFloat(currentTrail?.total_distance || 0);
+      
       let distToAdd = 0;
-      if (currentTrail && currentTrail.points.length > 0) {
-        const last = currentTrail.points[currentTrail.points.length - 1];
+      if (prevPoints.length > 0) {
+        const last = prevPoints[prevPoints.length - 1];
         distToAdd = haversine(last, point);
       }
 
-      const trail = await Trail.findOneAndUpdate(
-        { userId, date: today },
-        { 
-          $setOnInsert: { email, createdAt: new Date() },
-          $push: { points: point },
-          $inc: { totalDistance: distToAdd },
-          $set: { updatedAt: new Date() }
-        },
-        { upsert: true, new: true, runValidators: true }
-      );
+      const newPoints = [...prevPoints, point];
+      const newTotalDistance = prevDistance + distToAdd;
 
-      return res.status(200).json({ trail, pointCount: trail.points.length });
+      const { data: updatedTrail, error: upsertError } = await supabase
+        .from('trails')
+        .upsert({
+          user_id: userId,
+          date: today,
+          email,
+          points: newPoints,
+          total_distance: newTotalDistance,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id,date' })
+        .select()
+        .single();
+
+      if (upsertError) throw upsertError;
+
+      return res.status(200).json({ 
+        trail: {
+          points: updatedTrail.points,
+          totalDistance: parseFloat(updatedTrail.total_distance)
+        }, 
+        pointCount: updatedTrail.points.length 
+      });
     }
 
     // ── PUT: Update entire trail (edits / deletions) ──
@@ -80,37 +114,48 @@ export default async function handler(req, res) {
         totalDistance += haversine(newPoints[i - 1], newPoints[i]);
       }
 
-      const trail = await Trail.findOneAndUpdate(
-        { userId, date: today },
-        { 
-          $set: { 
-            points: newPoints, 
-            totalDistance, 
-            updatedAt: new Date(),
-            email // Ensure email is saved/updated
-          },
-          $setOnInsert: { createdAt: new Date() }
-        },
-        { upsert: true, new: true, runValidators: true }
-      );
+      const { data: updatedTrail, error: upsertError } = await supabase
+        .from('trails')
+        .upsert({
+          user_id: userId,
+          date: today,
+          email,
+          points: newPoints,
+          total_distance: totalDistance,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id,date' })
+        .select()
+        .single();
 
-      return res.status(200).json({ success: true, trail });
+      if (upsertError) throw upsertError;
+
+      return res.status(200).json({ 
+        success: true, 
+        trail: {
+          points: updatedTrail.points,
+          totalDistance: parseFloat(updatedTrail.total_distance)
+        } 
+      });
     }
 
     // ── DELETE: Clear today's trail ──
     if (req.method === 'DELETE') {
-      await Trail.deleteOne({ userId, date: today });
+      const { error } = await supabase
+        .from('trails')
+        .delete()
+        .eq('user_id', userId)
+        .eq('date', today);
+
+      if (error) throw error;
       return res.status(200).json({ success: true });
     }
 
     return res.status(405).json({ error: `Method ${req.method} not allowed` });
   } catch (err) {
-    // Log error internally, but don't leak stack traces to the client
-    const isMongoError = err.name === 'MongoError' || err.name === 'MongooseError';
-    console.error(`[API Error] trails.js ${isMongoError ? '(DB)' : ''}:`, err.message);
+    console.error(`[API Error] trails.js (Supabase):`, err.message);
     
     return res.status(500).json({ 
-      error: isMongoError ? 'Database connection failure. Please try again later.' : 'An internal server error occurred', 
+      error: 'An internal server error occurred', 
       message: process.env.NODE_ENV === 'development' ? err.message : undefined 
     });
   }

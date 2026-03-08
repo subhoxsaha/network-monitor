@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { MapPinPlus, RefreshCw, Clock, Route, Layers, RotateCcw, Locate, Map as MapIcon, Mountain, ChevronDown, Edit2, Trash2, Check, X } from 'lucide-react';
+import { MapPinPlus, RefreshCw, Clock, Route, Layers, RotateCcw, Locate, Map as MapIcon, Mountain, ChevronDown, Edit2, Trash2, Check, X, Bug, Loader2, Eye, EyeOff } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, Circle as LeafletCircle, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -11,6 +11,8 @@ import { useBrowserGeolocation } from '../hooks/useNetwork';
 import { getCookie, setCookie } from '../utils/cookies';
 import toast from 'react-hot-toast';
 import { apiCall } from '../lib/api';
+import RoutingEngine from './RoutingEngine';
+import { createPFPMarker, createWaypointIcon, waypointColor } from '../utils/mapIcons';
 
 // ── Constants ────────────────────────────────────────────
 const GOOGLE_MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY || '';
@@ -81,23 +83,6 @@ const MapInteractions = ({ onRightClick }) => {
 };
 
 // ── Helpers ──────────────────────────────────────────────
-const todayKey = () => {
-  // Use UTC YYYY-MM-DD to match the backend and avoid timezone drift
-  const today = new Date().toISOString().split('T')[0];
-  return `nm_trail_${today}`;
-};
-
-const getTrailFromStorage = () => {
-  try {
-    const raw = localStorage.getItem(todayKey());
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
-};
-
-const saveTrailToStorage = (trail) => {
-  localStorage.setItem(todayKey(), JSON.stringify(trail));
-};
-
 const haversine = (a, b) => {
   const R = 6371000;
   const toRad = (d) => (d * Math.PI) / 180;
@@ -134,12 +119,7 @@ const reverseGeocode = async (lat, lng) => {
   }
 };
 
-// ── Waypoint pin colors ─────────────────────────────────
-const pinColor = (i) => {
-  // Use a deterministic hue based on index so it's "random" but stable
-  const hue = (i * 137.5) % 360; // Golden angle for nice distribution
-  return `hsl(${hue}, 85%, 55%)`;
-};
+const pinColor = waypointColor;
 
 const pinLabel = (i, total) => {
   if (i === 0) return 'S';
@@ -149,7 +129,8 @@ const pinLabel = (i, total) => {
 
 // ── Main Component ──────────────────────────────────────
 const LocationTracker = () => {
-  const [trail, setTrail] = useState(() => getTrailFromStorage());
+  const { user } = useAuth();
+  const [trail, setTrail] = useState([]);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(true);
   const [mapType, setMapType] = useState(getCookie('nm_map_theme') || 'roadmap');
@@ -161,10 +142,30 @@ const LocationTracker = () => {
   const [cloudSyncing, setCloudSyncing] = useState(false);
   const [devMode, setDevMode] = useState(false);
   const [ghostPoint, setGhostPoint] = useState(null);
+  const [useStreetSnap, setUseStreetSnap] = useState(() => {
+    const saved = localStorage.getItem('nm_use_street_snap');
+    return saved !== null ? JSON.parse(saved) : true;
+  });
+  const [isRouting, setIsRouting] = useState(false);
+  const [roadSummary, setRoadSummary] = useState(null);
+  const [routeLineWeight, setRouteLineWeight] = useState(() => {
+    const saved = localStorage.getItem('nm_route_line_weight');
+    return saved !== null ? parseInt(saved, 10) : 4;
+  });
+  const [routeSegments, setRouteSegments] = useState([]);
+  const [hideUI, setHideUI] = useState(false);
+
+  // Persist user preferences
+  useEffect(() => {
+    localStorage.setItem('nm_use_street_snap', JSON.stringify(useStreetSnap));
+  }, [useStreetSnap]);
+
+  useEffect(() => {
+    localStorage.setItem('nm_route_line_weight', routeLineWeight.toString());
+  }, [routeLineWeight]);
   const mapRef = useRef(null);
   const selectedTheme = MAP_TYPES.find(t => t.id === mapType) || MAP_TYPES[0];
   const { copy } = useCopy();
-  const { user } = useAuth();
   const { position: livePos, requestLocation, permissionStatus, heading: compassHeading } = useBrowserGeolocation(); // Auto-tracks live location
 
   // Auto-request location on mount so the blue dot shows up immediately
@@ -190,7 +191,6 @@ const LocationTracker = () => {
       // If cloud has data, it wins (but we could merge later if needed)
       if (cloudPoints.length > 0) {
         setTrail(cloudPoints);
-        saveTrailToStorage(cloudPoints);
       } 
       // If cloud is empty but we have local points, sync THEM to the cloud
       else if (trail.length > 0) {
@@ -208,9 +208,6 @@ const LocationTracker = () => {
     refreshData(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.sub]);
-
-  // Persist to localStorage
-  useEffect(() => { saveTrailToStorage(trail); }, [trail]);
 
   // Removed manual fitBounds and mapped to MapBoundsFitter component for declarative Leaflet syncing
 
@@ -318,52 +315,13 @@ const LocationTracker = () => {
 
   // Create custom Blue Dot Icon
   const customDotMarker = useMemo(() => {
-    const isGPSActive = permissionStatus === 'granted';
-    const heading = compassHeading || 0;
-
-    if (isGPSActive && heading != null) {
-      return L.divIcon({
-        className: 'custom-leaflet-marker',
-        html: `
-          <div style="transform: rotate(${heading}deg); width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; position: relative;">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="#0a84ff" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="filter: drop-shadow(0px 1px 3px rgba(0,0,0,0.5)); transform: translateY(-4px);">
-              <path d="M12 2L2 22l10-4 10 4L12 2z" />
-            </svg>
-          </div>
-        `,
-        iconSize: [32, 32],
-        iconAnchor: [16, 16]
-      });
-    }
-
-    return L.divIcon({
-      className: 'custom-leaflet-marker',
-      html: `
-        <div style="width: 16px; height: 16px; background-color: #0a84ff; border: 2.5px solid white; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>
-      `,
-      iconSize: [16, 16],
-      iconAnchor: [8, 8]
-    });
-  }, [permissionStatus, compassHeading]);
+    return createPFPMarker(user?.picture, permissionStatus === 'granted', false, true);
+  }, [user?.picture, permissionStatus]);
 
   // Factory for dynamic waypoint markers
   const getWaypointIcon = useCallback((i) => {
-    const color = pinColor(i);
-    return L.divIcon({
-      className: 'custom-leaflet-waypoint-marker',
-      html: `
-        <div style="width: 28px; height: 28px;">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.4));">
-            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 1118 0z" fill="${color}" stroke="#fff" stroke-width="2"/>
-            <circle cx="12" cy="10" r="3" fill="#fff"/>
-          </svg>
-        </div>
-      `,
-      iconSize: [28, 28],
-      iconAnchor: [12, 24],
-      popupAnchor: [0, -22]
-    });
-  }, []);
+    return createWaypointIcon(i, i === selectedIdx);
+  }, [selectedIdx]);
 
   // Ghost waypoint icon
   const ghostIcon = useMemo(() => L.divIcon({
@@ -383,9 +341,48 @@ const LocationTracker = () => {
   // ── Render ────────────────────────────────────────────
 
   return (
-    <div className="space-y-6 animate-rise-in">
+    <div className="space-y-6 animate-rise-in location-tracker-container">
+      {/* ── Trail Header & Stats (Moved outside Map) ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-3xl border shadow-sm animate-rise-in header-stats-container" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--card-border)' }}>
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl flex items-center justify-center shadow-lg" style={{ background: 'rgba(255,159,10,0.1)', border: '1px solid rgba(255,159,10,0.2)' }}>
+            <Route className="w-5 h-5 text-[#ff9f0a]" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-bold text-ink tracking-tight">Daily Trail</h2>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'rgba(255,159,10,0.15)', color: '#ff9f0a' }}>
+                {new Date().toLocaleDateString([], { day: 'numeric', month: 'short' })}
+              </span>
+            </div>
+            {user?.sub && (
+              <p className="text-[10px] text-zinc-400 mt-0.5 flex items-center gap-1.5">
+                <span className={`w-1.5 h-1.5 rounded-full ${cloudSyncing ? 'bg-blue-400 animate-pulse' : 'bg-green-500'}`} />
+                {cloudSyncing ? 'Syncing to cloud...' : 'Synced to infrastructure'}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {trail.length > 0 && (
+          <div className="flex items-center gap-6 px-5 py-2.5 rounded-2xl bg-black/20 border border-white/5">
+            <div>
+              <p className="text-zinc-500 uppercase text-[9px] font-bold tracking-widest mb-0.5">Waypoints</p>
+              <p className="text-ink font-mono font-bold text-sm tracking-tight">{trail.length}</p>
+            </div>
+            <div className="h-8 w-px bg-white/10" />
+            <div>
+              <p className="text-zinc-500 uppercase text-[9px] font-bold tracking-widest mb-0.5">Route Distance</p>
+              <p className="text-ink font-mono font-bold text-sm tracking-tight">
+                {useStreetSnap && roadSummary ? formatDistance(roadSummary.totalDistance) : formatDistance(totalDistance)}
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* ── Immersive Floating Map Card ── */}
-      <Card className="p-0 overflow-hidden relative shadow-xl bg-surface" style={{ borderRadius: '24px', height: '36rem' }}>
+      <Card className="p-0 overflow-hidden relative shadow-2xl bg-surface map-card-main" style={{ borderRadius: '32px', height: '38rem', border: '1px solid var(--card-border)' }}>
         
         {/* Loading Overlay */}
         <div 
@@ -425,33 +422,46 @@ const LocationTracker = () => {
             <MapBoundsFitter trail={trail} livePos={livePos} activeIdx={selectedIdx} />
             {devMode && <MapInteractions onRightClick={(ll) => setGhostPoint(ll)} />}
 
-            {polylinePath.length >= 2 && (
-              <>
-                {/* Outer Glow Polyline */}
-                <Polyline 
-                  positions={polylinePath} 
-                  pathOptions={{ 
-                    color: '#0a84ff', 
-                    opacity: 0.25, 
-                    weight: 8,
-                    lineJoin: 'round',
-                    lineCap: 'round',
-                    className: 'map-glow-trail'
-                  }} 
-                />
-                {/* Core Crisp Polyline */}
-                <Polyline 
-                  positions={polylinePath} 
-                  pathOptions={{ 
-                    color: '#0a84ff', 
-                    opacity: 0.9, 
-                    weight: 3,
-                    lineJoin: 'round',
-                    lineCap: 'round'
-                  }} 
-                />
-              </>
-            )}
+            <RoutingEngine 
+              waypoints={trail} 
+              enabled={useStreetSnap} 
+              onSummary={setRoadSummary}
+              onLoading={setIsRouting}
+              onRouteSegments={setRouteSegments}
+            />
+
+            {/* Per-segment coloured connecting lines (works for both OSRM routes and straight lines) */}
+            {(useStreetSnap ? routeSegments : trail.reduce((acc, p, i) => {
+              if (i > 0) acc.push([[trail[i - 1].lat, trail[i - 1].lng], [p.lat, p.lng]]);
+              return acc;
+            }, [])).map((coords, i) => {
+              // coords is an array of LatLngs for segment `i` (which connects waypoint i to i+1)
+              const color = waypointColor(i + 1); // Colour based on the destination waypoint
+              return (
+                <React.Fragment key={`seg-${useStreetSnap ? 'osrm' : 'straight'}-${i}`}>
+                  <Polyline
+                    positions={coords}
+                    pathOptions={{
+                      color: color,
+                      opacity: 0.15,
+                      weight: routeLineWeight * 3,
+                      lineJoin: 'round',
+                      lineCap: 'round',
+                    }}
+                  />
+                  <Polyline
+                    positions={coords}
+                    pathOptions={{
+                      color: color,
+                      opacity: 0.9,
+                      weight: routeLineWeight,
+                      lineJoin: 'round',
+                      lineCap: 'round',
+                    }}
+                  />
+                </React.Fragment>
+              );
+            })}
 
             {/* Ghost Manual Marker (Dev Mode) */}
             {devMode && ghostPoint && (
@@ -508,92 +518,79 @@ const LocationTracker = () => {
             
             {/* Live User Position Marker (Blue Dot with Arrow if moving) */}
             {livePos && (
-              <>
-                <Marker
-                  position={[livePos.latitude, livePos.longitude]}
-                  icon={customDotMarker}
-                  zIndexOffset={9999}
-                />
-                {livePos.accuracy && (
-                  <LeafletCircle
-                    center={[livePos.latitude, livePos.longitude]}
-                    radius={livePos.accuracy}
-                    pathOptions={{
-                      fillColor: '#0a84ff',
-                      fillOpacity: 0.15,
-                      color: '#0a84ff',
-                      opacity: 0.3,
-                      weight: 1,
-                    }}
-                    interactive={false}
-                  />
-                )}
-              </>
+              <Marker
+                position={[livePos.latitude, livePos.longitude]}
+                icon={customDotMarker}
+                zIndexOffset={9999}
+              />
             )}
           </MapContainer>
         </div>
 
-        {/* ── Floating Top Left (Title & Stats) ── */}
+        {/* ── Floating Top Left (Dev Toggle) & Restore UI ── */}
         <div className="absolute top-4 left-4 z-10 flex flex-col gap-2 pointer-events-none">
-          {/* Header Panel */}
-          <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-2xl shadow-lg pointer-events-auto" style={{ background: 'rgba(28,28,30,0.85)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.1)' }}>
-            <button 
-              onClick={() => {
-                setDevMode(!devMode);
-                if (devMode) setGhostPoint(null);
-                toast(devMode ? 'Dev Mode Disabled' : 'Dev Mode Enabled', { id: 'dev-toggle' });
-              }}
-              className="hover:opacity-80 transition-all duration-300 relative group"
-              aria-label={devMode ? "Disable developer mode" : "Enable developer mode"}
-            >
-              {devMode && (
-                <span className="absolute inset-0 rounded-full bg-blue-400/20 animate-ping scale-150" />
-              )}
-              <Route className={`w-4 h-4 transition-colors relative z-10 ${devMode ? 'text-blue-400' : 'text-[#ff9f0a]'}`} />
-            </button>
-            <h2 className="text-sm font-bold text-white tracking-wide">Daily Trail</h2>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'rgba(255,159,10,0.15)', color: '#ff9f0a' }}>
-              {new Date().toLocaleDateString([], { day: 'numeric', month: 'short' })}
-            </span>
-            {user?.sub && (
-              <span className={`text-[10px] px-2 py-0.5 rounded-full backdrop-blur-md transition-all duration-300 ${cloudSyncing ? 'text-blue-400 bg-blue-500/20 animate-pulse' : 'text-zinc-400 bg-black/40'}`}>
-                {cloudSyncing ? '☁ Syncing...' : '☁ Synced'}
-              </span>
-            )}
-          </div>
-          
-          {/* Stats Panel */}
-          {trail.length > 0 && (
-            <div className="flex items-center gap-4 px-4 py-2.5 rounded-2xl shadow-lg pointer-events-auto" style={{ background: 'rgba(28,28,30,0.85)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.1)' }}>
-              <div>
-                <p className="text-zinc-400 uppercase text-[9px] font-bold tracking-wider mb-0.5">Waypoints</p>
-                <p className="text-white font-mono font-bold text-xs">{trail.length}</p>
-              </div>
-              <div className="w-px h-6 bg-white/10" />
-              <div>
-                <p className="text-zinc-400 uppercase text-[9px] font-bold tracking-wider mb-0.5">Distance</p>
-                <p className="text-white font-mono font-bold text-xs">{formatDistance(totalDistance)}</p>
-              </div>
+          {!hideUI && (
+            <div className="flex items-center gap-2.5 px-3 py-2 rounded-2xl shadow-lg pointer-events-auto" style={{ background: 'rgba(28,28,30,0.85)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.1)' }}>
+              <button 
+                onClick={() => {
+                  setDevMode(!devMode);
+                  if (devMode) setGhostPoint(null);
+                  toast(devMode ? 'Dev Mode Disabled' : 'Dev Mode Enabled', { id: 'dev-toggle' });
+                }}
+                className="flex items-center gap-2 hover:opacity-80 transition-all duration-300 relative group"
+              >
+                <div className="relative">
+                  {devMode && <span className="absolute inset-0 rounded-full bg-blue-400/30 animate-ping scale-150" />}
+                  <Bug className={`w-3.5 h-3.5 ${devMode ? 'text-blue-400' : 'text-zinc-500'}`} />
+                </div>
+                <span className="text-[10px] font-bold text-zinc-300 uppercase tracking-widest">Dev Mode</span>
+              </button>
             </div>
+          )}
+
+          {/* Clean UI Restore Button */}
+          {hideUI && (
+            <button
+              onClick={() => setHideUI(false)}
+              className="pointer-events-auto w-10 h-10 flex items-center justify-center rounded-full shadow-2xl transition-all duration-300 hover:scale-105 active:scale-95 animate-rise-in"
+              style={{ background: 'rgba(28,28,30,0.85)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.2)' }}
+              title="Restore UI"
+            >
+              <Eye className="w-5 h-5 text-blue-400" />
+            </button>
           )}
         </div>
 
-        {/* ── Floating Top Right (Controls & Actions) ── */}
-        <div className="absolute top-4 right-4 z-50 flex flex-col items-end gap-2">
-          {/* Map Type Toggle Dropdown */}
-          <div className="relative group">
-            <button
-              onClick={() => setMapTypeOpen(!mapTypeOpen)}
-              onBlur={() => setTimeout(() => setMapTypeOpen(false), 200)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold shadow-lg transition-transform hover:scale-105 active:scale-95"
-              style={{ background: 'rgba(28,28,30,0.85)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff' }}
-              aria-label="Toggle map theme selector"
-              aria-expanded={mapTypeOpen}
-            >
-              <selectedTheme.icon className="w-3.5 h-3.5 text-zinc-300" />
-              <span>Map Type</span>
-              <ChevronDown className="w-3 h-3 transition-transform" style={{ transform: mapTypeOpen ? 'rotate(180deg)' : 'rotate(0deg)' }} />
-            </button>
+        {/* ── Overlay Controls (Hidden in Clean Mode) ── */}
+        {!hideUI && (
+          <>
+            {/* ── Floating Top Right (Controls & Actions) ── */}
+            <div className="absolute top-4 right-4 z-50 flex flex-col items-end gap-2">
+              <div className="flex gap-2 items-center">
+                {/* Clean UI Toggle Button */}
+                <button
+                  onClick={() => setHideUI(true)}
+                  className="w-8 h-8 flex items-center justify-center rounded-full shadow-lg transition-transform hover:scale-105 active:scale-95"
+                  style={{ background: 'rgba(28,28,30,0.85)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.1)' }}
+                  title="Hide UI for Screenshot"
+                >
+                  <EyeOff className="w-3.5 h-3.5 text-zinc-300 hover:text-white transition-colors" />
+                </button>
+
+                {/* Map Type Toggle Dropdown */}
+                <div className="relative group">
+                  <button
+                    onClick={() => setMapTypeOpen(!mapTypeOpen)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold shadow-lg transition-transform hover:scale-105 active:scale-95"
+                    style={{ background: 'rgba(28,28,30,0.85)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff' }}
+                    aria-label="Toggle map theme selector"
+                    aria-expanded={mapTypeOpen}
+                  >
+                    <selectedTheme.icon className="w-3.5 h-3.5 text-zinc-300" />
+                    <span>Map Type</span>
+                    <ChevronDown className="w-3 h-3 transition-transform" style={{ transform: mapTypeOpen ? 'rotate(180deg)' : 'rotate(0deg)' }} />
+                  </button>
+                  {/* ... dropdown content ... */}
 
             {mapTypeOpen && (
               <div
@@ -608,8 +605,7 @@ const LocationTracker = () => {
                       if (mapType !== id) {
                         setIsMapReady(false);
                         setMapType(id);
-                        setCookie('nm_map_theme', id, 30); // Set cookie here
-                        // Simulate loading delay for new tiles
+                        setCookie('nm_map_theme', id, 30);
                         setTimeout(() => setIsMapReady(true), 600);
                       }
                     }}
@@ -623,11 +619,33 @@ const LocationTracker = () => {
                     {mapType === id && <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />}
                   </button>
                 ))}
+
+                {/* Route Width Slider — inside dropdown */}
+                {trail.length >= 2 && (
+                  <>
+                    <div className="h-px bg-white/10 my-1" />
+                    <div className="flex items-center gap-2 px-3 py-1.5">
+                      <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest whitespace-nowrap">Line</span>
+                      <input
+                        type="range"
+                        min="2"
+                        max="10"
+                        step="1"
+                        value={routeLineWeight}
+                        onChange={(e) => setRouteLineWeight(Number(e.target.value))}
+                        className="route-width-slider flex-1"
+                        style={{ accentColor: '#0a84ff' }}
+                      />
+                      <span className="text-[10px] font-mono text-zinc-300 w-4 text-center">{routeLineWeight}</span>
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>
+        </div>
 
-          {/* Action Buttons */}
+        {/* Action Buttons */}
           <div className="flex gap-2">
             <button
               onClick={() => refreshData(false)}
@@ -639,6 +657,23 @@ const LocationTracker = () => {
             >
               <RefreshCw className="w-4 h-4 text-zinc-300" />
             </button>
+            <button
+              onClick={() => setUseStreetSnap(!useStreetSnap)}
+              title={useStreetSnap ? "Disable Street Snap" : "Enable Street Snap"}
+              className={`w-9 h-9 flex items-center justify-center rounded-full shadow-lg transition-transform hover:scale-105 active:scale-95`}
+              style={{ 
+                background: useStreetSnap ? '#0a84ff' : 'rgba(28,28,30,0.85)', 
+                backdropFilter: 'blur(16px)', 
+                border: '1px solid rgba(255,255,255,0.1)' 
+              }}
+              aria-label="Toggle street-based routing"
+            >
+              {isRouting ? (
+                <Loader2 className="w-4 h-4 text-white animate-spin" />
+              ) : (
+                <Route className={`w-4 h-4 ${useStreetSnap ? 'text-white' : 'text-zinc-300'}`} />
+              )}
+            </button>
           </div>
         </div>
 
@@ -647,7 +682,7 @@ const LocationTracker = () => {
           <button
             onClick={markLocation}
             disabled={loading}
-            className="flex items-center gap-2 px-6 py-3.5 rounded-full font-bold shadow-2xl transition-all duration-300 hover:scale-105 active:scale-95 disabled:opacity-50 group overflow-hidden relative"
+            className="flex items-center gap-2 px-6 py-3.5 rounded-full font-bold shadow-2xl transition-all duration-300 hover:scale-105 active:scale-95 disabled:opacity-50 group overflow-hidden relative mark-location-btn"
             style={{ 
               background: loading ? 'rgba(28,28,30,0.85)' : '#30d158', 
               color: '#fff', 
@@ -680,12 +715,14 @@ const LocationTracker = () => {
             setSelectedIdx(null); // Unselect any waypoint
           }}
           title="Re-center on Live Location"
-          className="absolute bottom-6 right-6 z-10 w-12 h-12 flex items-center justify-center rounded-full shadow-2xl transition-transform hover:scale-105 active:scale-95"
+          className="absolute bottom-6 right-6 z-10 w-12 h-12 flex items-center justify-center rounded-full shadow-2xl transition-transform hover:scale-105 active:scale-95 recenter-btn"
           style={{ background: 'rgba(28,28,30,0.85)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.15)' }}
           aria-label="Center map on your current location"
         >
           <Locate className="w-6 h-6 text-blue-500" />
         </button>
+          </>
+        )}
       </Card>
 
       {/* Waypoint Log */}
@@ -700,20 +737,18 @@ const LocationTracker = () => {
             {trail.map((point, i) => (
               <div
                 key={point.timestamp}
-                className="flex items-center gap-3 py-2 text-xs rounded-lg px-2 group hover:bg-surface-light transition-colors border-b border-[var(--row-border)]"
+                className="flex items-center gap-3 py-2 text-xs rounded-lg px-2 group hover:bg-surface-light transition-colors border-b border-[var(--row-border)] overflow-hidden"
               >
                 <div
-                  className="flex items-center gap-3 flex-1 cursor-pointer"
-                  onClick={() => {
-                    setSelectedIdx(i);
-                  }}
+                  className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
+                  onClick={() => setSelectedIdx(i)}
                 >
                   <span
                     className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0 shadow-sm"
                     style={{ background: pinColor(i) }}
                   >{i + 1}</span>
                   
-                  <div className="flex flex-col flex-1">
+                  <div className="flex flex-col flex-1 min-w-0">
                     {editingIdx === i ? (
                       <input
                         type="text"
@@ -722,12 +757,12 @@ const LocationTracker = () => {
                         onChange={(e) => setEditLabel(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && saveEdit(i)}
                         onBlur={() => saveEdit(i)}
-                        className="bg-transparent text-ink font-semibold border-b border-blue-500 focus:outline-none w-full"
+                        className="bg-transparent text-ink font-semibold border-b border-blue-500 focus:outline-none w-full text-xs"
                         onClick={(e) => e.stopPropagation()}
                         aria-label="Edit waypoint label"
                       />
                     ) : (
-                      <span className="text-ink font-semibold truncate max-w-[120px] sm:max-w-[200px]">
+                      <span className="text-ink font-semibold truncate">
                         {point.label || `Waypoint #${i + 1}`}
                       </span>
                     )}
@@ -742,28 +777,36 @@ const LocationTracker = () => {
                   </div>
                 </div>
 
-                {/* Edit & Delete Actions */}
-                <div className="hidden group-hover:flex items-center gap-1 shrink-0">
+                {/* Edit & Delete — visible on hover OR when this row is being edited */}
+                <div className={`${editingIdx === i ? 'flex' : 'hidden group-hover:flex'} items-center gap-1 shrink-0`}>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      setEditingIdx(i);
-                      setEditLabel(point.label || `Waypoint #${i + 1}`);
+                      if (editingIdx === i) {
+                        saveEdit(i);
+                      } else {
+                        setEditingIdx(i);
+                        setEditLabel(point.label || `Waypoint #${i + 1}`);
+                      }
                     }}
-                    className="p-1.5 rounded-md hover:bg-white/10 text-ink-tertiary hover:text-blue-500 transition-colors"
-                    title="Edit Label"
+                    className={`p-1.5 rounded-md transition-colors ${editingIdx === i ? 'bg-blue-500/20 text-blue-500' : 'hover:bg-white/10 text-ink-tertiary hover:text-blue-500'}`}
+                    title={editingIdx === i ? "Save" : "Edit Label"}
                   >
-                    <Edit2 className="w-3.5 h-3.5" />
+                    {editingIdx === i ? <Check className="w-3.5 h-3.5" /> : <Edit2 className="w-3.5 h-3.5" />}
                   </button>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      deletePoint(i);
+                      if (editingIdx === i) {
+                        setEditingIdx(null);
+                      } else {
+                        deletePoint(i);
+                      }
                     }}
-                    className="p-1.5 rounded-md hover:bg-red-500/10 text-ink-tertiary hover:text-red-500 transition-colors"
-                    title="Delete Waypoint"
+                    className={`p-1.5 rounded-md transition-colors ${editingIdx === i ? 'hover:bg-white/10 text-ink-tertiary' : 'hover:bg-red-500/10 text-ink-tertiary hover:text-red-500'}`}
+                    title={editingIdx === i ? "Cancel" : "Delete Waypoint"}
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
+                    {editingIdx === i ? <X className="w-3.5 h-3.5" /> : <Trash2 className="w-3.5 h-3.5" />}
                   </button>
                 </div>
               </div>

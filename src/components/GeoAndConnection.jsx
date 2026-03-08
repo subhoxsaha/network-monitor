@@ -4,7 +4,10 @@ import { MapContainer, TileLayer, Marker, Popup, Circle as LeafletCircle, useMap
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useSharedPublicIP } from '../context/NetworkContext';
+import { useAuth } from '../context/AuthContext';
 import { useBrowserGeolocation, useConnectionDetails } from '../hooks/useNetwork';
+import { useOtherUsers } from '../hooks/useOtherUsers';
+import { createPFPMarker } from '../utils/mapIcons';
 import Card from './Card';
 import Button from './Button';
 import Badge from './Badge';
@@ -31,6 +34,7 @@ const MapCenterer = ({ lat, lng, zoom }) => {
 };
 
 const GeoAndConnection = () => {
+  const { user } = useAuth();
   const { geoData, ip, loading: geoLoading, error: geoError } = useSharedPublicIP();
   const geo = useBrowserGeolocation();
   const connData = useConnectionDetails();
@@ -41,6 +45,9 @@ const GeoAndConnection = () => {
   const mapRef = useRef(null);
   const selectedTheme = MAP_TYPES.find(t => t.id === mapType) || MAP_TYPES[0];
   const { copy } = useCopy();
+  
+  // Fetch other users (polls every 30s)
+  const { users: otherUsers } = useOtherUsers(isMapReady);
 
   // Auto-request GPS on mount
   useEffect(() => {
@@ -86,39 +93,8 @@ const GeoAndConnection = () => {
 
   // Create custom Blue Dot Icon with HTML
   const customDotMarker = useMemo(() => {
-    const geoStatus = geo.permissionStatus; // Use actual permission status
-    const isGPSActive = showingGPS && geoStatus === 'granted';
-    const heading = geo.heading || 0;
-
-    // Animate compass arrow for active GPS
-    if (isGPSActive && heading != null) {
-      return L.divIcon({
-        className: 'custom-leaflet-marker',
-        html: `
-          <div style="transform: rotate(${heading}deg); width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; position: relative;">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="#30d158" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="filter: drop-shadow(0px 1px 3px rgba(0,0,0,0.5)); transform: translateY(-4px);">
-              <path d="M12 2L2 22l10-4 10 4L12 2z" />
-            </svg>
-          </div>
-        `,
-        iconSize: [32, 32],
-        iconAnchor: [16, 16], // Center of SVG
-        popupAnchor: [0, -12],
-      });
-    }
-
-    // Default Circle for non-GPS or denied GPS
-    return L.divIcon({
-      className: 'custom-leaflet-marker',
-      html: `
-        <div style="width: 16px; height: 16px; background-color: ${isGPSActive ? '#30d158' : '#0a84ff'}; border: 2.5px solid white; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">
-        </div>
-      `,
-      iconSize: [16, 16],
-      iconAnchor: [8, 8],
-      popupAnchor: [0, -8],
-    });
-  }, [showingGPS, geo.permissionStatus, geo.position?.heading]);
+    return createPFPMarker(user?.picture, showingGPS && geo.permissionStatus === 'granted');
+  }, [user?.picture, showingGPS, geo.permissionStatus]);
 
 
   const TableRow = ({ label, value }) => (
@@ -215,19 +191,6 @@ const GeoAndConnection = () => {
 
                 <MapCenterer lat={lat} lng={lng} zoom={mapZoom} />
 
-                <LeafletCircle
-                  center={mapCenter}
-                  radius={accuracy}
-                  pathOptions={{
-                    color: showingGPS ? '#30d158' : '#0a84ff',
-                    weight: 1,
-                    opacity: 0.3,
-                    fillColor: showingGPS ? '#30d158' : '#0a84ff',
-                    fillOpacity: 0.15,
-                  }}
-                  interactive={false}
-                />
-
                 <Marker position={mapCenter} icon={customDotMarker}>
                   <Popup className="custom-popup" closeButton={false}>
                     <div style={{ fontFamily: 'Inter, sans-serif', minWidth: '160px', padding: '2px' }}>
@@ -256,6 +219,34 @@ const GeoAndConnection = () => {
                     </div>
                   </Popup>
                 </Marker>
+
+                {/* Other Users Markers */}
+                {otherUsers.map((otherUser) => (
+                  <Marker 
+                    key={otherUser.userId} 
+                    position={[otherUser.lat, otherUser.lng]} 
+                    icon={createPFPMarker(null, false, true, otherUser.isOnline)}
+                    zIndexOffset={otherUser.isOnline ? 500 : 100} // Online users appear above offline users
+                  >
+                    <Popup className="custom-popup" closeButton={false}>
+                      <div style={{ fontFamily: 'Inter, sans-serif', padding: '2px' }}>
+                        <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '4px', color: '#1c1c1e' }}>
+                          {otherUser.email.split('@')[0]}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#636366', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span style={{ 
+                            display: 'inline-block', 
+                            width: '8px', 
+                            height: '8px', 
+                            borderRadius: '50%', 
+                            backgroundColor: otherUser.isOnline ? '#30d158' : '#8e8e93' 
+                          }} />
+                          {otherUser.isOnline ? 'Active Now' : 'Offline (Last known location)'}
+                        </div>
+                      </div>
+                    </Popup>
+                  </Marker>
+                ))}
               </MapContainer>
             </div>
 
@@ -341,7 +332,7 @@ const GeoAndConnection = () => {
                 .custom-popup .leaflet-popup-content-wrapper { border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.15); }
                 .custom-popup .leaflet-popup-tip { box-shadow: 0 4px 16px rgba(0,0,0,0.15); }
                 .custom-popup .leaflet-popup-content { margin: 12px; }
-              `}} />
+              `}}></style>
             </div>
           )}
         </div>

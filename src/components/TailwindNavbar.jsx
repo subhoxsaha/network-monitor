@@ -126,9 +126,9 @@ const TailwindNavbar = () => {
 
               {isMenuOpen && (
                 <div 
-                  className="absolute right-0 mt-2 w-56 sm:w-64 rounded-2xl border shadow-2xl overflow-hidden animate-rise-in backdrop-blur-2xl"
+                  className="absolute right-0 mt-2 w-56 sm:w-64 rounded-2xl border shadow-2xl overflow-hidden animate-rise-in"
                   style={{ 
-                    backgroundColor: 'rgba(var(--color-surface-rgb), 2)', 
+                    backgroundColor: 'var(--color-surface)', 
                     borderColor: 'var(--card-border)',
                     boxShadow: '0 20px 40px rgba(0,0,0,0.3)'
                   }}
